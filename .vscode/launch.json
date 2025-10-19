@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run GatherUp API",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}",
+      "env": {
+        "DATABASE_DSN": "gatherup:strongpassword@tcp(127.0.0.1:3306)/gatherupdb?parseTime=true",
+        "JWT_SECRET": "dev-secret-change-me",
+        "PORT": "8080"
+      }
+    }
+  ]
+}
