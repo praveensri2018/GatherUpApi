@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Local Folder Summarizer — Tree View (no truncation, strip deco comments)</title>
+  <style>
+    :root {
+      --bg: #f6f8fa;
+      --card: #fff;
+      --muted: #666;
+      --accent: #2b7cff
+    }
+
+    body {
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: #111;
+      margin: 0;
+      padding: 18px
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px
+    }
+
+    .controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap
+    }
+
+    input[type="text"] {
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #ddd
+    }
+
+    button {
+      padding: 8px 10px;
+      border-radius: 6px;
+      border: 1px solid #cfcfcf;
+      background: #fff;
+      cursor: pointer
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid #e6e6e6;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 12px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03)
+    }
+
+    .left {
+      width: 46%;
+      min-width: 320px
+    }
+
+    .right {
+      flex: 1;
+      margin-left: 16px
+    }
+
+    .tree {
+      max-height: 520px;
+      overflow: auto;
+      padding: 6px;
+      border-radius: 6px;
+      border: 1px solid #eee;
+      background: #fafafa
+    }
+
+    ul.tree-root,
+    ul.folder {
+      list-style: none;
+      margin: 0;
+      padding-left: 18px
+    }
+
+    .node {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px;
+      border-radius: 4px
+    }
+
+    .node:hover {
+      background: #fff
+    }
+
+    .folder-toggle {
+      width: 16px;
+      height: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 13px
+    }
+
+    .file-meta {
+      font-size: 12px;
+      color: #666
+    }
+
+    .summary-area {
+      white-space: pre-wrap;
+      font-family: ui-monospace, monospace;
+      background: #fff;
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #f0f0f0;
+      max-height: 420px;
+      overflow: auto
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center
+    }
+
+    textarea.prompt {
+      width: 100%;
+      height: 140px;
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #ddd;
+      resize: vertical
+    }
+
+    .small {
+      font-size: 13px;
+      color: var(--muted)
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #ddd;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      display: inline-block
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .actions {
+      margin-left: auto;
+      display: flex;
+      gap: 6px
+    }
+
+    .path-small {
+      font-size: 12px;
+      color: #666
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Local Folder Summarizer — Tree View (no truncation, strip deco comments)</h1>
+      <div class="controls">
+        <button id="pickDirBtn">Pick Folder (showDirectoryPicker)</button>
+        <button id="fallbackBtn">Fallback: Choose Folder</button>
+        <input id="fileInput" type="file" webkitdirectory directory multiple style="display:none" />
+        <button id="scanBtn" class="primary">Scan</button>
+      </div>
+    </header>
+
+    <div class="panel" style="display:flex;gap:12px;align-items:flex-start">
+      <div class="left">
+        <div class="toolbar">
+          <button id="expandAllBtn">Expand All</button>
+          <button id="collapseAllBtn">Collapse All</button>
+          <button id="selectAllBtn">Select All</button>
+          <button id="clearAllBtn">Clear All</button>
+          <div class="actions">
+            <button id="previewCheckedBtn">Preview Checked</button>
+          </div>
+            <div id="extFilters" class="small" style="margin-top:6px">
+    Extensions:
+    <span id="extList" class="path-small">(no folder selected)</span>
+  </div>
+        </div>
+
+        <div class="small">Folder tree (uncheck items to skip them)</div>
+        <div id="tree" class="tree">
+          <div class="muted">No folder selected.</div>
+        </div>
+      </div>
+
+      <div class="right">
+        <div class="row" style="align-items:flex-start">
+          <div style="flex:1">
+            <div class="small">Summaries</div>
+            <div id="summaries" class="summary-area">(no summaries yet)</div>
+            <div style="margin-top:8px;display:flex;gap:8px">
+              <button id="summBtn" class="primary">Summarize Selected</button>
+              <button id="copyAllBtn">Copy All Summaries</button>
+              <button id="genPromptBtn">Generate Prompt</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <div class="small">Generated Prompt (editable)</div>
+          <textarea id="promptArea" class="prompt" placeholder="Generated prompt will appear here..."></textarea>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+            <button id="copyPromptBtn">Copy Prompt</button>
+            <button id="clearPromptBtn">Clear</button>
+            <div style="margin-left:auto;" class="muted">Tip: paste into AI tool (OpenAI/HF).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+ 
+
+    const allowedExt = ['.js', '.ts', '.html', '.css', '.scss'];
+
+    const pickDirBtn = document.getElementById('pickDirBtn');
+    const fallbackBtn = document.getElementById('fallbackBtn');
+    const fileInput = document.getElementById('fileInput');
+    const scanBtn = document.getElementById('scanBtn');
+
+    const treeEl = document.getElementById('tree');
+    const sumEl = document.getElementById('summaries');
+
+    const extFiltersEl = document.getElementById('extFilters');
+    const extListEl = document.getElementById('extList');
+    let selectedExts = null;            // Set of allowed extensions (strings like ".js")
+    let extCheckboxEls = null;
+
+    const expandAllBtn = document.getElementById('expandAllBtn');
+    const collapseAllBtn = document.getElementById('collapseAllBtn');
+    const selectAllBtn = document.getElementById('selectAllBtn');
+    const clearAllBtn = document.getElementById('clearAllBtn');
+    const previewCheckedBtn = document.getElementById('previewCheckedBtn');
+
+    const summBtn = document.getElementById('summBtn');
+    const copyAllBtn = document.getElementById('copyAllBtn');
+    const genPromptBtn = document.getElementById('genPromptBtn');
+    const promptArea = document.getElementById('promptArea');
+    const copyPromptBtn = document.getElementById('copyPromptBtn');
+    const clearPromptBtn = document.getElementById('clearPromptBtn');
+
+    let fileItems = []; // array of {path, name, handle or file}
+    let treeData = {};  // nested object representing tree
+
+    // UTIL
+    function extOf(name) { const i = name.lastIndexOf('.'); return i >= 0 ? name.slice(i).toLowerCase() : ''; }
+    function escapeHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+
+
+
+
+    // ADD: build and render distinct extension checkboxes, and apply filter on change
+    function updateExtensionList() {
+      const exts = Array.from(new Set(fileItems.map(it => extOf(it.name)))).sort();
+      if (!exts.length) {
+        extListEl.textContent = '(no files)';
+        selectedExts = new Set();
+        extCheckboxEls = null;
+        return;
+      }
+      // render inline checkboxes
+      extListEl.innerHTML = exts.map(e => {
+        const label = e || '[no ext]';
+        return `<label style="margin-right:8px"><input type="checkbox" data-ext="${e}" checked> ${label}</label>`;
+      }).join(' ');
+      // cache inputs and set selectedExts
+      extCheckboxEls = extListEl.querySelectorAll('input[type=checkbox]');
+      selectedExts = new Set(exts);
+      extCheckboxEls.forEach(chk => {
+        chk.addEventListener('change', () => {
+          const ex = chk.dataset.ext;
+          if (chk.checked) selectedExts.add(ex);
+          else selectedExts.delete(ex);
+          applyExtensionFilter();
+        });
+      });
+    }
+
+    // ADD: apply currently selected extensions to fileItems and re-render tree
+    function applyExtensionFilter() {
+      if (!selectedExts) {
+        updateExtensionList();
+      }
+      const filtered = fileItems.filter(it => selectedExts.has(extOf(it.name)));
+      // rebuild fileItemsMap for filtered set
+      fileItemsMap = {};
+      filtered.forEach(it => fileItemsMap[it.path] = it);
+      // rebuild treeData and render
+      treeData = buildTree(filtered);
+      treeEl.innerHTML = '';
+      treeEl.appendChild(renderTree(treeData));
+      sumEl.innerText = `Found ${filtered.length} files (filtered by extension). Uncheck files/folders to skip.`;
+    }
+    // END ADD
+
+
+    // Render tree recursively
+    function renderTree(node, parentPath = '') {
+      const ul = document.createElement('ul');
+      ul.className = parentPath ? 'folder' : 'tree-root';
+      for (const key of Object.keys(node).sort((a, b) => a.localeCompare(b))) {
+        if (key === '__files') continue;
+        const li = document.createElement('li');
+        const fullPath = parentPath ? parentPath + '/' + key : key;
+        // folder node
+        const folderDiv = document.createElement('div');
+        folderDiv.className = 'node';
+        const toggle = document.createElement('span');
+        toggle.className = 'folder-toggle';
+        toggle.textContent = '▶';
+        toggle.style.userSelect = 'none';
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.dataset.path = fullPath;
+        chk.checked = true;
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = key + '/';
+        nameSpan.style.fontWeight = '600';
+        nameSpan.className = 'path-small';
+        const actions = document.createElement('div'); actions.className = 'actions';
+        const countSpan = document.createElement('span'); countSpan.className = 'muted';
+        // compute counts for folder
+        const counts = countFilesInNode(node[key]);
+        countSpan.textContent = ` ${counts} files`;
+        folderDiv.appendChild(toggle);
+        folderDiv.appendChild(chk);
+        folderDiv.appendChild(nameSpan);
+        folderDiv.appendChild(countSpan);
+        folderDiv.appendChild(actions);
+
+        li.appendChild(folderDiv);
+
+        // children container
+        const childContainer = document.createElement('div');
+        childContainer.style.display = 'none';
+        childContainer.style.paddingLeft = '12px';
+
+        // folder checkbox toggle children
+        chk.addEventListener('change', () => {
+          const checked = chk.checked;
+          // toggle all descendant checkboxes
+          const inputs = childContainer.querySelectorAll('input[type=checkbox]');
+          inputs.forEach(i => i.checked = checked);
+        });
+
+        // toggle arrow
+        toggle.addEventListener('click', () => {
+          if (childContainer.style.display === 'none') {
+            childContainer.style.display = '';
+            toggle.textContent = '▼';
+          } else {
+            childContainer.style.display = 'none';
+            toggle.textContent = '▶';
+          }
+        });
+
+        // render child folders recursively
+        const childNode = node[key];
+        // render subfolders
+        const subUl = renderTree(childNode, fullPath);
+        // append subfiles under node
+        if (childNode.__files) {
+          const filesDiv = document.createElement('div');
+          filesDiv.style.display = 'flex';
+          filesDiv.style.flexDirection = 'column';
+          filesDiv.style.gap = '4px';
+          for (const fname of Object.keys(childNode.__files).sort((a, b) => a.localeCompare(b))) {
+            const fileItem = childNode.__files[fname]; // the item object with path and handle/file
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'node';
+            const fileChk = document.createElement('input');
+            fileChk.type = 'checkbox';
+            fileChk.dataset.path = (fullPath ? fullPath + '/' + fname : fname);
+            fileChk.checked = true;
+            const fnSpan = document.createElement('span');
+            fnSpan.textContent = fname;
+            fnSpan.className = 'path-small';
+            const viewBtn = document.createElement('button');
+            viewBtn.textContent = 'View';
+            viewBtn.style.marginLeft = 'auto';
+            viewBtn.addEventListener('click', async () => {
+              // preview single file
+              sumEl.textContent = 'Loading preview...';
+              const r = await summarizeSingleFile(fileItem);
+              // TELL-EVERY-TIME: show the file path above the preview every time
+              sumEl.innerHTML = `<div style="font-weight:600">File: ${escapeHtml(r.path)}</div><pre style="white-space:pre-wrap">${escapeHtml(r.summary)}</pre>`;
+            });
+            fileDiv.appendChild(fileChk);
+            fileDiv.appendChild(fnSpan);
+            fileDiv.appendChild(viewBtn);
+            filesDiv.appendChild(fileDiv);
+          }
+          childContainer.appendChild(filesDiv);
+        }
+        childContainer.appendChild(subUl);
+
+        li.appendChild(childContainer);
+        ul.appendChild(li);
+      }
+
+      // if there are __files at this level root (only when parentPath empty)
+      if (node.__files && Object.keys(node.__files).length) {
+        for (const fname of Object.keys(node.__files).sort((a, b) => a.localeCompare(b))) {
+          const it = node.__files[fname];
+          const li = document.createElement('li');
+          const fileDiv = document.createElement('div');
+          fileDiv.className = 'node';
+          const chk = document.createElement('input'); chk.type = 'checkbox'; chk.dataset.path = fname; chk.checked = true;
+          const span = document.createElement('span'); span.textContent = fname; span.className = 'path-small';
+          const viewBtn = document.createElement('button'); viewBtn.textContent = 'View'; viewBtn.style.marginLeft = 'auto';
+          viewBtn.addEventListener('click', async () => {
+            sumEl.textContent = 'Loading preview...';
+            const r = await summarizeSingleFile(it);
+            // TELL-EVERY-TIME: show the file path above the preview every time
+            sumEl.innerHTML = `<div style="font-weight:600">File: ${escapeHtml(r.path)}</div><pre style="white-space:pre-wrap">${escapeHtml(r.summary)}</pre>`;
+          });
+          fileDiv.appendChild(chk); fileDiv.appendChild(span); fileDiv.appendChild(viewBtn);
+          li.appendChild(fileDiv);
+          ul.appendChild(li);
+        }
+      }
+
+      return ul;
+    }
+
+    // count files helper
+    function countFilesInNode(node) {
+      let c = 0;
+      if (!node) return 0;
+      if (node.__files) c += Object.keys(node.__files).length;
+      for (const k of Object.keys(node)) {
+        if (k === '__files') continue;
+        c += countFilesInNode(node[k]);
+      }
+      return c;
+    }
+
+    // summarize single file (NO truncated code - returns full processed summary)
+    async function summarizeSingleFile(item) {
+      try {
+        let text = '';
+        if (item.handle && typeof item.handle.getFile === 'function') {
+          const f = await item.handle.getFile();
+          text = await f.text();
+        } else if (item.file) {
+          text = await item.file.text();
+        } else {
+          return { path: item.path, summary: 'Cannot read file' };
+        }
+
+        // NOTE: user requested "don't truncated code" — do not remove large block comments
+        // unless they are decorative separators; strip decorative comment blocks/lines below.
+        // TELL-EVERY-TIME: this is where full file content is processed and kept.
+
+        text = text.replace(/	/g, '    ');
+
+        // Remove decorative comment blocks like: /* ----- SOMETHING ----- */
+        text = text.replace(/\/\*\s*[-=~_*]{2,}[\s\S]*?[-=~_*]{2,}\s*\*\//g, '');
+        // Remove single-line decorative block comments: /* ---- text ---- */ on one line
+        text = text.replace(/(^|\n)\s*\/\*\s*[-=~_*]{2,}[^]*?[-=~_*]{2,}\s*\*\/\s*(?=\n|$)/g, '\n');
+        // Remove single-line decorative // ----- comments
+        text = text.replace(/(^|\n)\s*\/\/\s*[-=~_*]{2,}.*(?=\n|$)/g, '\n');
+
+        // Build head and tail but do NOT truncate content; include full content in `snippetFull`
+        const lines = text.split(/\r?\n/);
+        const firstNonEmpty = lines.findIndex(l => l.trim().length > 0);
+        const head = lines.slice(Math.max(0, firstNonEmpty), Math.min(lines.length, (firstNonEmpty === -1 ? 0 : firstNonEmpty) + 30)).join('\n').trim();
+        const tail = lines.slice(Math.max(0, lines.length - 5)).join('\n').trim();
+
+        // full snippet (no slicing)
+        const snippetFull = text;
+
+        // extract identifiers (best-effort)
+        const ids = new Set();
+        const reExport = /(?:export\s+(?:const|let|var|function|class)\s+([A-Za-z0-9_$]+))/g;
+        let m;
+        while ((m = reExport.exec(snippetFull)) != null) ids.add(m[1]);
+        const m2 = snippetFull.match(/module\.exports\s*=\s*([A-Za-z0-9_$]+)/);
+        if (m2) ids.add(m2[1]);
+        if (/@Component\b/.test(snippetFull) || /@Directive\b/.test(snippetFull)) ids.add('AngularComponent/Directive?');
+
+        const parts = [];
+        // TELL-EVERY-TIME: include the exact file path heading here (always)
+        parts.push(`File: ${item.path}`);
+        if (ids.size) parts.push(`Key identifiers: ${Array.from(ids).slice(0, 8).join(', ')}`);
+        parts.push('--- Head (first lines) ---');
+        parts.push(head || '(empty)');
+        parts.push('--- Tail (last lines) ---');
+        parts.push(tail || '(empty)');
+        parts.push('--- Full content (below) ---');
+        parts.push(snippetFull || '(empty)');
+
+        const out = parts.join('\n');
+        // NO truncation added here
+        return { path: item.path, summary: out };
+      } catch (e) {
+        return { path: item.path, summary: 'ERROR reading file: ' + e.message };
+      }
+    }
+
+    // collect checked file items from tree
+    function getCheckedFilesFromTree() {
+      const checked = [];
+      const checks = treeEl.querySelectorAll('input[type=checkbox]');
+      checks.forEach(chk => {
+        const path = chk.dataset.path;
+        if (!path) return;
+        const it = fileItemsMap[path];
+        if (it && chk.checked) checked.push(it);
+      });
+      return checked;
+    }
+
+    // flatten fileItems list and build map path->item
+    let fileItemsMap = {};
+
+    // showDirectoryPicker flow
+    pickDirBtn.addEventListener('click', async () => {
+      if (!window.showDirectoryPicker) {
+        alert('showDirectoryPicker not supported — use fallback');
+        return;
+      }
+      try {
+        const dir = await window.showDirectoryPicker();
+        const items = [];
+        async function walk(dh, prefix = '') {
+          for await (const [name, handle] of dh.entries()) {
+            if (handle.kind === 'file') {
+              const ext = extOf(name);
+              if (allowedExt.includes(ext)) {
+                items.push({ path: prefix + name, name, handle });
+              }
+            } else if (handle.kind === 'directory') {
+              await walk(handle, prefix + name + '/');
+            }
+          }
+        }
+        await walk(dir);
+        fileItems = items.sort((a, b) => a.path.localeCompare(b.path));
+        fileItemsMap = {}; fileItems.forEach(it => fileItemsMap[it.path] = it);
+        updateExtensionList();
+        applyExtensionFilter();
+        treeData = buildTree(fileItems);
+        treeEl.innerHTML = '';
+        treeEl.appendChild(renderTree(treeData));
+        sumEl.innerText = `Found ${fileItems.length} files. Uncheck files/folders to skip.`;
+      } catch (e) {
+        if (e.name === 'AbortError') sumEl.innerText = 'Pick cancelled';
+        else sumEl.innerText = 'Error: ' + e.message;
+      }
+    });
+
+    // fallback - webkitdirectory
+    fallbackBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (ev) => {
+      const files = Array.from(ev.target.files || []);
+      const items = [];
+      for (const f of files) {
+        const ext = extOf(f.name);
+        if (allowedExt.includes(ext)) {
+          const rel = f.webkitRelativePath || f.name;
+          items.push({ path: rel, name: f.name, file: f });
+        }
+      }
+      fileItems = items.sort((a, b) => a.path.localeCompare(b.path));
+      fileItemsMap = {}; fileItems.forEach(it => fileItemsMap[it.path] = it);
+      updateExtensionList();
+      applyExtensionFilter();
+      treeData = buildTree(fileItems);
+      treeEl.innerHTML = '';
+      treeEl.appendChild(renderTree(treeData));
+      sumEl.innerText = `Found ${fileItems.length} files. Uncheck files/folders to skip.`;
+    });
+
+    // helper actions
+    expandAllBtn.addEventListener('click', () => {
+      treeEl.querySelectorAll('div.folder-toggle').forEach(t => { t.textContent = '▼'; const c = t.parentElement.nextSibling; if (c) c.style.display = ''; });
+      // old structure uses .folder-toggle class name on span; ensure selection works across browsers
+      treeEl.querySelectorAll('.folder-toggle').forEach(t => { t.textContent = '▼'; const c = t.parentElement.nextSibling; if (c) c.style.display = ''; });
+    });
+    collapseAllBtn.addEventListener('click', () => {
+      treeEl.querySelectorAll('.folder-toggle').forEach(t => { t.textContent = '▶'; const c = t.parentElement.nextSibling; if (c) c.style.display = 'none'; });
+    });
+    selectAllBtn.addEventListener('click', () => {
+      treeEl.querySelectorAll('input[type=checkbox]').forEach(chk => chk.checked = true);
+    });
+    clearAllBtn.addEventListener('click', () => {
+      treeEl.querySelectorAll('input[type=checkbox]').forEach(chk => chk.checked = false);
+    });
+
+    // preview checked (summarize only first checked file quickly)
+    previewCheckedBtn.addEventListener('click', async () => {
+      const allChecked = getCheckedFilesFromTree();
+      if (!allChecked.length) { alert('No files selected'); return; }
+      sumEl.innerText = 'Loading preview...';
+      const r = await summarizeSingleFile(allChecked[0]);
+      // TELL-EVERY-TIME: show the file path above the preview every time
+      sumEl.innerHTML = `<div style="font-weight:600">File: ${escapeHtml(r.path)}</div><pre style="white-space:pre-wrap">${escapeHtml(r.summary)}</pre>`;
+    });
+
+    // summarize selected
+    summBtn.addEventListener('click', async () => {
+      // collect checked files by inspecting checkboxes and map
+      const checks = Array.from(treeEl.querySelectorAll('input[type=checkbox]'));
+      const selectedPaths = [];
+      checks.forEach(chk => {
+        const p = chk.dataset.path;
+        if (!p) return;
+        // we treat a path as file if it exists in fileItemsMap
+        if (fileItemsMap[p] && chk.checked) selectedPaths.push(p);
+      });
+      if (!selectedPaths.length) { alert('No files selected'); return; }
+      sumEl.innerText = 'Summarizing selected files...';
+      const results = [];
+      for (const p of selectedPaths) {
+        const it = fileItemsMap[p];
+        const r = await summarizeSingleFile(it);
+        results.push(r);
+      }
+      // render combined
+      // TELL-EVERY-TIME: each result shows the File: heading (see summarizeSingleFile)
+      sumEl.innerHTML = results.map(r => `<div style="font-weight:600">File: ${escapeHtml(r.path)}</div><pre style="white-space:pre-wrap">${escapeHtml(r.summary)}</pre>`).join('<hr/>');
+      // store current summaries for prompt/copy
+      window.currentSummaries = results;
+    });
+
+    // copy all summaries
+    copyAllBtn.addEventListener('click', () => {
+      const s = window.currentSummaries || [];
+      if (!s.length) { alert('No summaries to copy'); return; }
+      const txt = s.map(r => `--- ${r.path} ---\n${r.summary}`).join('\n\n');
+      navigator.clipboard.writeText(txt).then(() => alert('Summaries copied'));
+    });
+
+    // generate prompt
+    // REPLACE: genPromptBtn click handler with cleaned summaries inserted into prompt
+    genPromptBtn.addEventListener('click', () => {
+      const s = window.currentSummaries || [];
+      if (!s.length) { alert('No summaries — summarize first'); return; }
+
+      // Clean each summary: remove noisy single-line comments and tidy code blocks, but DO NOT truncate
+      const cleaned = s.map(r => {
+        // Keep heading path, but clean the summary body
+        const header = `File: ${r.path}`;
+        let body = r.summary || '';
+        // attempt to remove a duplicate "File: ..." prefix if present
+        body = body.replace(new RegExp('^File:\\s*' + r.path.replace(/[.*+?^${}()|[\\]\\]/g,'\\$&') + '\\s*', 'm'), '');
+        // Now clean body text, but DO NOT truncate.
+        const cleanedBody = cleanCode(body, Infinity);
+        return `${header}\nSummary:\n${cleanedBody}`;
+      });
+
+      const combined = cleaned.join('\n\n');
+
+      const prompt = [
+        "You are an experienced software engineer. Below are short summaries of important project files (comments removed and code cleaned).",
+        "Please provide:",
+        "1) A concise list of recommended code changes / refactors (bullet points).",
+        "2) A short implementation plan (3-6 steps).",
+        "3) Example code snippets if helpful.",
+        "",
+        "Summaries (cleaned):",
+        combined,
+        "",
+        "Answer concisely."
+      ].join('\n');
+
+      // TELL-EVERY-TIME: Generated prompt placed into promptArea here every time.
+      promptArea.value = prompt;
+      promptArea.scrollIntoView({ behavior: 'smooth' });
+    });
+    // END REPLACE
+
+
+    // copy prompt and clear
+    copyPromptBtn.addEventListener('click', () => {
+      const t = promptArea.value.trim();
+      if (!t) { alert('Prompt empty'); return; }
+      navigator.clipboard.writeText(t).then(() => alert('Prompt copied'));
+    });
+    clearPromptBtn.addEventListener('click', () => promptArea.value = '');
+
+    // small scan button (rebuild tree if fileItems already loaded)
+    scanBtn.addEventListener('click', () => {
+      if (!fileItems || !fileItems.length) { alert('No folder loaded — pick or fallback first'); return; }
+      // if extension UI not initialized yet, initialize it
+      if (!selectedExts) updateExtensionList();
+      applyExtensionFilter();
+    });
+
+    // ADD: helper to strip comments (light) and "clean" code text before putting into the generated prompt
+    // UPDATED: helper to strip ALL comments and clean code text
+function cleanCode(text, maxLen = 2000) {
+  if (!text) return '';
+
+  // Remove single-line comments (// ...) but preserve URLs like http://
+  text = text.replace(/(^|[^:])\/\/.*$/gm, (m, p1) => p1);
+  
+  // Remove multi-line comments (/* ... */)
+  text = text.replace(/\/\*[\s\S]*?\*\//g, '');
+  
+  // Remove HTML-style comments (<!-- ... -->)
+  text = text.replace(/<!--[\s\S]*?-->/g, '');
+  
+  // Collapse multiple consecutive empty lines to just one empty line
+  text = text.replace(/\n\s*\n\s*\n+/g, '\n\n');
+  
+  // Trim trailing spaces on each line
+  text = text.split('\n').map(l => l.replace(/\s+$/, '')).join('\n');
+  
+  // Remove leading spaces that create empty-looking lines
+  text = text.split('\n').map(l => l.trim() === '' ? '' : l).join('\n');
+  
+  // Collapse multiple consecutive empty lines again after trimming
+  text = text.replace(/\n\s*\n\s*\n+/g, '\n\n');
+  
+  // Normalize Windows CRLF -> LF
+  text = text.replace(/\r\n/g, '\n');
+  
+  // Trim overall
+  text = text.trim();
+  
+  // NOTE: user requested no truncation; only apply maxLen if it's finite
+  if (isFinite(maxLen) && text.length > maxLen) text = text.slice(0, maxLen) + '\n\n...truncated...';
+  
+  return text;
+}
+    // END ADD
+
+
+    // Helper: buildTree (simple)
+    function buildTree(fileList) {
+      const root = {};
+      for (const it of fileList) {
+        const parts = it.path.split('/');
+        let cur = root;
+        for (let i = 0; i < parts.length; i++) {
+          const p = parts[i];
+          if (i === parts.length - 1) {
+            // file
+            cur.__files = cur.__files || {};
+            cur.__files[p] = it;
+          } else {
+            cur[p] = cur[p] || {};
+            cur = cur[p];
+          }
+        }
+      }
+      return root;
+    }
+
+    // initial state
+    window.currentSummaries = [];
+  </script>
+</body>
+
+</html>
