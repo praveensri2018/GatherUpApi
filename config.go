@@ -15,7 +15,7 @@ func MsSQLDSN() string {
 	// Default fallback connection (change only Database name if needed)
 	return GetEnv(
 		"DATABASE_URL",
-		"Server=94.249.213.96,1433;Database=GatherUpDB;User Id=sa;Password=Sivanya@2025;TrustServerCertificate=true;Encrypt=false;",
+		"Server=94.249.213.91,1433;Database=GatherUpDB;User Id=sa;Password=Iniyal@14;TrustServerCertificate=true;Encrypt=false;",
 	)
 }
 
