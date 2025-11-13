@@ -61,7 +61,7 @@ mobile/android/
 | **Realtime** | Gorilla/WebSocket |
 | **Database** | Microsoft SQL Server |
 | **ORM/DB** | GORM or sqlx |
-| **Storage** | AWS S3 / Azure Blob (for media uploads) |
+| **Storage** | cloudflare R2 |
 | **Background Jobs** | Leaderboard updates, notifications, counters |
 
 #### 📁 Project Structure
