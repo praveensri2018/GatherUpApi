@@ -45,6 +45,8 @@ mobile/android/
 │   │   │   │   │   │   ├── LoginScreen.kt
 │   │   │   │   │   │   ├── RegisterScreen.kt
 │   │   │   │   │   │   └── ForgotPasswordScreen.kt
+│   │   │   │   │   ├── onboarding/
+│   │   │   │   │   │   └── SplashScreen.kt
 │   │   │   │   │   ├── FeedScreen.kt
 │   │   │   │   │   ├── PostDetailScreen.kt
 │   │   │   │   │   ├── PostComposerScreen.kt
