@@ -7,6 +7,7 @@ import (
 	"gatherup/auth"
 	"gatherup/repository"
 	"gatherup/service"
+
 	"github.com/go-chi/chi/v5"
 )
 

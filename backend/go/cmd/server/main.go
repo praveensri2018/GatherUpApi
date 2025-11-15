@@ -25,7 +25,7 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	userRepo := repository.NewUserRepo(dbConn)
+	userRepo := repository.NewUserRepo(dbConn, nil, nil)
 	jwtMgr := auth.NewJWTManager(cfg.JWTSecret, cfg.AccessTokenTTL)
 
 	authCfg := &service.AuthConfig{

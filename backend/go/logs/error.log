@@ -1,0 +1,6 @@
+2025/11/16 00:06:40 ERROR: GetCredentialByIdentifier: stored user_id not uuid identifier=9042122855 user_id=¸è–ºì‡5Gá-lœHÔ¥ err=invalid UUID length: 16
+2025/11/16 00:07:00 ERROR: GetCredentialByIdentifier: stored user_id not uuid identifier=9042122855 user_id=¸è–ºì‡5Gá-lœHÔ¥ err=invalid UUID length: 16
+2025/11/16 00:09:46 ERROR: SaveRefreshToken: exec failed id=20c966be-c829-4478-abdc-c8cb503ab36a userID=fc8fd0bc-93e0-3547-872d-196ccf48efb4 err=mssql: The INSERT statement conflicted with the FOREIGN KEY constraint "fk_refresh_user". The conflict occurred in database "GatherUpDB", table "dbo.users", column 'id'.
+2025/11/16 00:12:39 ERROR: GetRefreshTokenRow: row has invalid user id rr.ID= kﬂÉ˝≠ÍI∂‡‚wïb“Ê userID="\xfc\x8f–º\x93\xe05G\x87-\x19l\xcfH\xef\xb4" err=invalid UUID length: 16
+2025/11/16 00:14:35 ERROR: RotateRefreshToken: invalid oldID=" kﬂÉ\xfd\xad\xeaI\xb6\xe0\xe2w\x95b\xd2\xe6" err=invalid UUID length: 16
+2025/11/16 00:15:15 ERROR: RotateRefreshToken: invalid oldID=" kﬂÉ\xfd\xad\xeaI\xb6\xe0\xe2w\x95b\xd2\xe6" err=invalid UUID length: 16

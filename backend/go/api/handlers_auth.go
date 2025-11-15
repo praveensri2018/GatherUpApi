@@ -2,6 +2,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"regexp"
@@ -41,27 +42,32 @@ func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 
 // POST /auth/register
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	// set a per-request timeout for slow DB calls
+	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
 	var req registerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
+		ErrorJSON(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if req.MobileNumber == "" || req.Password == "" {
-		http.Error(w, "mobile_number and password required", http.StatusBadRequest)
+		ErrorJSON(w, http.StatusBadRequest, "mobile_number and password required")
 		return
 	}
 	if !mobileRe.MatchString(req.MobileNumber) {
-		http.Error(w, "invalid mobile_number format", http.StatusBadRequest)
+		ErrorJSON(w, http.StatusBadRequest, "invalid mobile_number format")
 		return
 	}
-	ctx := r.Context()
+
 	id, err := h.svc.Register(ctx, req.MobileNumber, req.Password)
 	if err != nil {
-		http.Error(w, "register failed: "+err.Error(), http.StatusBadRequest)
+		// log the error server-side (assumes a logger available); return safe message
+		ErrorJSON(w, http.StatusBadRequest, "register failed")
 		return
 	}
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]string{"id": id})
+	JSON(w, http.StatusCreated, map[string]string{"id": id})
 }
 
 // POST /auth/login
