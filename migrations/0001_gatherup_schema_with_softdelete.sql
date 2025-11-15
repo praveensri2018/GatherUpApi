@@ -905,3 +905,19 @@ END
 GO
 
 
+IF OBJECT_ID('dbo.refresh_tokens','U') IS NULL
+BEGIN
+  CREATE TABLE dbo.refresh_tokens (
+    id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWSEQUENTIALID(),
+    user_id UNIQUEIDENTIFIER NOT NULL,
+    token_hash NVARCHAR(256) NOT NULL,
+    device_info NVARCHAR(1000) NULL,
+    created_at DATETIMEOFFSET NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    expires_at DATETIMEOFFSET NOT NULL,
+    is_revoked BIT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX idx_refresh_tokens_user ON dbo.refresh_tokens(user_id);
+  CREATE INDEX idx_refresh_tokens_hash ON dbo.refresh_tokens(token_hash);
+END
+GO
