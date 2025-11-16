@@ -44,7 +44,7 @@ jobs:
           ls -l ../${{ env.BIN_NAME }}
 
       - name: Start ssh-agent and add private key
-        uses: webfactory/ssh-agent@v0.8.1
+        uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
@@ -58,12 +58,11 @@ jobs:
 
       - name: Copy binary to remote host (scp)
         run: |
-          # create remote releases dir and copy artifact
           TIMESTAMP=$(date +%s)
           REMOTE_RELEASE_DIR="${{ secrets.REMOTE_DIR }}/releases/${TIMESTAMP}"
           echo "Creating remote release dir: $REMOTE_RELEASE_DIR"
           ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} "mkdir -p '$REMOTE_RELEASE_DIR'"
-          scp -P ${VPS_PORT:-22} ./backend/${{ env.BIN_NAME }} ${VPS_USER}@${VPS_HOST}:$REMOTE_RELEASE_DIR/${{ env.BIN_NAME }}
+          scp -P ${VPS_PORT:-22} ./${{ env.BIN_NAME }} ${VPS_USER}@${VPS_HOST}:$REMOTE_RELEASE_DIR/${{ env.BIN_NAME }}
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -77,17 +76,26 @@ jobs:
           echo "Set latest symlink -> $BIN_PATH"
           ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} bash -lc "
             set -euo pipefail
-            # ensure dirs
+
+            # ensure dirs exist
             sudo mkdir -p '${{ secrets.REMOTE_DIR }}' '${{ secrets.REMOTE_DIR }}/releases'
+
+            # link the new binary
             sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
-            sudo chown -R root:root '${{ secrets.REMOTE_DIR }}'
+
+            # ensure executable and correct perms
             sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
-            # cleanup old releases
+            sudo chown -R root:root '${{ secrets.REMOTE_DIR }}'
+
+            # cleanup old releases (keep first KEEP_RELEASES)
             cd '${{ secrets.REMOTE_DIR }}/releases'
-            ls -1t | tail -n +$(( ${{ env.KEEP_RELEASES }} + 1)) | xargs -r sudo rm -rf --
-            # restart systemd service
+            ls -1t | tail -n +$(( ${{ env.KEEP_RELEASES }} + 1 )) | xargs -r sudo rm -rf --
+
+            # restart service
             sudo systemctl daemon-reload || true
             sudo systemctl restart '${{ secrets.SYSTEMD_SERVICE }}'
+
+            # show recent logs for the unit
             sudo journalctl -u '${{ secrets.SYSTEMD_SERVICE }}' -n 120 --no-pager -o short-iso
           "
         env:
