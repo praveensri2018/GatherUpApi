@@ -1,0 +1,96 @@
+name: CI Build & SCP Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      BACKEND_DIR: backend/go
+      BIN_NAME: gatherup-server
+      KEEP_RELEASES: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Cache modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: ${{ runner.os }}-go-
+
+      - name: Run tests
+        run: |
+          cd ${{ env.BACKEND_DIR }}
+          go test ./... -v
+
+      - name: Build linux binary
+        run: |
+          cd ${{ env.BACKEND_DIR }}
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ../${{ env.BIN_NAME }} ./cmd/server
+          ls -l ../${{ env.BIN_NAME }}
+
+      - name: Start ssh-agent and add private key
+        uses: webfactory/ssh-agent@v0.8.1
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add remote host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${VPS_PORT:-22} -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+        env:
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+
+      - name: Copy binary to remote host (scp)
+        run: |
+          # create remote releases dir and copy artifact
+          TIMESTAMP=$(date +%s)
+          REMOTE_RELEASE_DIR="${{ secrets.REMOTE_DIR }}/releases/${TIMESTAMP}"
+          echo "Creating remote release dir: $REMOTE_RELEASE_DIR"
+          ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} "mkdir -p '$REMOTE_RELEASE_DIR'"
+          scp -P ${VPS_PORT:-22} ./backend/${{ env.BIN_NAME }} ${VPS_USER}@${VPS_HOST}:$REMOTE_RELEASE_DIR/${{ env.BIN_NAME }}
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+
+      - name: Install binary and restart service (remote)
+        run: |
+          TIMESTAMP=$(date +%s)
+          REMOTE_RELEASE_DIR="${{ secrets.REMOTE_DIR }}/releases/${TIMESTAMP}"
+          BIN_PATH="${{ secrets.REMOTE_DIR }}/${{ env.BIN_NAME }}"
+          echo "Set latest symlink -> $BIN_PATH"
+          ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} bash -lc "
+            set -euo pipefail
+            # ensure dirs
+            sudo mkdir -p '${{ secrets.REMOTE_DIR }}' '${{ secrets.REMOTE_DIR }}/releases'
+            sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
+            sudo chown -R root:root '${{ secrets.REMOTE_DIR }}'
+            sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
+            # cleanup old releases
+            cd '${{ secrets.REMOTE_DIR }}/releases'
+            ls -1t | tail -n +$(( ${{ env.KEEP_RELEASES }} + 1)) | xargs -r sudo rm -rf --
+            # restart systemd service
+            sudo systemctl daemon-reload || true
+            sudo systemctl restart '${{ secrets.SYSTEMD_SERVICE }}'
+            sudo journalctl -u '${{ secrets.SYSTEMD_SERVICE }}' -n 120 --no-pager -o short-iso
+          "
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
