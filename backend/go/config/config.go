@@ -22,7 +22,7 @@ func Load() *AppConfig {
 	c := &AppConfig{
 		DSN:               MsSQLDSN(),
 		JWTSecret:         JwtSecret(),
-		AccessTokenTTL:    getenvDuration("ACCESS_TOKEN_TTL", 15*time.Minute),
+		AccessTokenTTL:    getenvDuration("ACCESS_TOKEN_TTL", 30*24*time.Hour),
 		RefreshTokenTTL:   getenvDuration("REFRESH_TOKEN_TTL", 30*24*time.Hour),
 		BcryptCost:        getenvInt("BCRYPT_COST", 12),
 		ServerAddr:        ":" + GetEnv("PORT", "8080"),
