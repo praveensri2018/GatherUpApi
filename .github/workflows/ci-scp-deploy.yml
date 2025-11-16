@@ -49,17 +49,24 @@ jobs:
         run: |
           echo "=== tell every time: running tests ==="
           cd ${{ env.BACKEND_DIR }}
+          # Place: tests run from backend/go
           go test ./... -v
 
       # ---------------------------------------------
-      # Build binary
+      # Build binary (place binary in repo root)
       # ---------------------------------------------
       - name: Build linux binary
         run: |
-          echo "=== tell every time: building binary ==="
+          echo "=== tell every time: building binary (placing in repo root) ==="
           cd ${{ env.BACKEND_DIR }}
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ../${{ env.BIN_NAME }} ./cmd/server
-          ls -l ../${{ env.BIN_NAME }}
+          # Place: working dir = backend/go
+          # Place: build target is ../../${{ env.BIN_NAME }} which is repo root ./${{ env.BIN_NAME }}
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -v -o ../../${{ env.BIN_NAME }} ./cmd/server
+          echo "=== tell every time: built binary should be at repo root: ./${{ env.BIN_NAME }} ==="
+          ls -l ../../${{ env.BIN_NAME }} || true
+          echo "=== tell every time: listing repo root to confirm binary presence ==="
+          ls -al ..
 
       # ---------------------------------------------
       # Validate required secrets
@@ -84,7 +91,7 @@ jobs:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       # ---------------------------------------------
-      # Add host key
+      # Add remote host to known_hosts (safe)
       # ---------------------------------------------
       - name: Add remote host to known_hosts (safe)
         env:
@@ -94,13 +101,22 @@ jobs:
           set -euo pipefail
           echo "=== tell every time: adding host to known_hosts ==="
           PORT="${VPS_PORT:-22}"
-
           ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts
           echo "Host added: ${VPS_HOST}:${PORT}"
           echo "=== tell every time: known_hosts step done ==="
 
       # ---------------------------------------------
-      # SCP upload
+      # Debug listing before SCP (confirm binary location)
+      # ---------------------------------------------
+      - name: List workspace and backend to confirm binary
+        run: |
+          echo "=== tell every time: list repo root (expect ./{{ env.BIN_NAME }}) ==="
+          ls -al .
+          echo "=== tell every time: list backend dir (for reference) ==="
+          ls -al ${{ env.BACKEND_DIR }} || true
+
+      # ---------------------------------------------
+      # SCP upload (uploads ./gatherup-server from repo root)
       # ---------------------------------------------
       - name: Copy binary to remote host (scp)
         env:
@@ -111,6 +127,11 @@ jobs:
         run: |
           set -euo pipefail
           echo "=== tell every time: starting SCP upload ==="
+
+          # Place: scp expects local file at repo root: ./${{ env.BIN_NAME }}
+          LOCAL_BINARY="./${{ env.BIN_NAME }}"
+          echo "=== tell every time: local binary path used by SCP: ${LOCAL_BINARY} ==="
+          test -f "${LOCAL_BINARY}" || { echo "ERROR: local binary not found at ${LOCAL_BINARY}"; ls -al .; exit 1; }
 
           TIMESTAMP=$(date +%s)
           REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
@@ -127,7 +148,7 @@ jobs:
           fi
 
           echo "Uploading binary..."
-          scp -P "${VPS_PORT:-22}" ./${{ env.BIN_NAME }} \
+          scp -P "${VPS_PORT:-22}" "${LOCAL_BINARY}" \
             "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
 
           echo "=== tell every time: SCP upload done ==="
@@ -157,6 +178,7 @@ jobs:
 
             sudo mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/releases'
 
+            # Place: remote release file will be at ${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}
             sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
             sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
             sudo chown -R root:root '${REMOTE_DIR}' || true
