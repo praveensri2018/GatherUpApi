@@ -46,12 +46,13 @@ jobs:
       - name: Validate required secrets
         run: |
           set -euo pipefail
-          : "${{ secrets.VPS_SSH_KEY?: }}"; echo "VPS_SSH_KEY present"
-          : "${{ secrets.VPS_HOST?: }}"; echo "VPS_HOST present"
-          : "${{ secrets.VPS_USER?: }}"; echo "VPS_USER present"
-          : "${{ secrets.REMOTE_DIR?: }}"; echo "REMOTE_DIR present"
-          : "${{ secrets.SYSTEMD_SERVICE?: }}"; echo "SYSTEMD_SERVICE present"
-        # if any secret missing this step fails with clear message
+          # these expand before the script runs; check presence and fail with clear messages
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || { echo "Missing secret: VPS_SSH_KEY"; exit 1; }
+          [ -n "${{ secrets.VPS_HOST }}" ] || { echo "Missing secret: VPS_HOST"; exit 1; }
+          [ -n "${{ secrets.VPS_USER }}" ] || { echo "Missing secret: VPS_USER"; exit 1; }
+          [ -n "${{ secrets.REMOTE_DIR }}" ] || { echo "Missing secret: REMOTE_DIR"; exit 1; }
+          [ -n "${{ secrets.SYSTEMD_SERVICE }}" ] || { echo "Missing secret: SYSTEMD_SERVICE"; exit 1; }
+          echo "All required secrets present."
 
       - name: Start ssh-agent and add private key
         uses: webfactory/ssh-agent@v0.9.0
@@ -69,13 +70,13 @@ jobs:
             exit 1
           fi
 
-          # attempt name resolution / keyscan but don't let it crash unintuitively
           PORT="${VPS_PORT:-22}"
           echo "Running ssh-keyscan -p ${PORT} ${VPS_HOST}"
+          # capture errors to a temp file so we can show a helpful message
           if ! ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/tmp/sshkeyscan.err; then
-            echo "ssh-keyscan failed; showing last lines of error:"
+            echo "ssh-keyscan failed; last lines of error:"
             tail -n 200 /tmp/sshkeyscan.err || true
-            echo "If host is an IP, ensure it's reachable from GitHub Actions (no firewall)."
+            echo "Ensure the host is reachable from GitHub Actions (no firewall) and VPS_HOST is correct."
             exit 1
           fi
           echo "Host added to known_hosts."
