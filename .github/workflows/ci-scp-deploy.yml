@@ -43,62 +43,78 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ../${{ env.BIN_NAME }} ./cmd/server
           ls -l ../${{ env.BIN_NAME }}
 
+      - name: Validate required secrets
+        run: |
+          set -euo pipefail
+          : "${{ secrets.VPS_SSH_KEY?: }}"; echo "VPS_SSH_KEY present"
+          : "${{ secrets.VPS_HOST?: }}"; echo "VPS_HOST present"
+          : "${{ secrets.VPS_USER?: }}"; echo "VPS_USER present"
+          : "${{ secrets.REMOTE_DIR?: }}"; echo "REMOTE_DIR present"
+          : "${{ secrets.SYSTEMD_SERVICE?: }}"; echo "SYSTEMD_SERVICE present"
+        # if any secret missing this step fails with clear message
+
       - name: Start ssh-agent and add private key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - name: Add remote host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p ${VPS_PORT:-22} -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+      - name: Add remote host to known_hosts (safe)
         env:
-          VPS_PORT: ${{ secrets.VPS_PORT }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VPS_HOST}" ]; then
+            echo "ERROR: VPS_HOST is empty. Set repository secret VPS_HOST to your server IP/hostname."
+            exit 1
+          fi
+
+          # attempt name resolution / keyscan but don't let it crash unintuitively
+          PORT="${VPS_PORT:-22}"
+          echo "Running ssh-keyscan -p ${PORT} ${VPS_HOST}"
+          if ! ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/tmp/sshkeyscan.err; then
+            echo "ssh-keyscan failed; showing last lines of error:"
+            tail -n 200 /tmp/sshkeyscan.err || true
+            echo "If host is an IP, ensure it's reachable from GitHub Actions (no firewall)."
+            exit 1
+          fi
+          echo "Host added to known_hosts."
 
       - name: Copy binary to remote host (scp)
-        run: |
-          TIMESTAMP=$(date +%s)
-          REMOTE_RELEASE_DIR="${{ secrets.REMOTE_DIR }}/releases/${TIMESTAMP}"
-          echo "Creating remote release dir: $REMOTE_RELEASE_DIR"
-          ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} "mkdir -p '$REMOTE_RELEASE_DIR'"
-          scp -P ${VPS_PORT:-22} ./${{ env.BIN_NAME }} ${VPS_USER}@${VPS_HOST}:$REMOTE_RELEASE_DIR/${{ env.BIN_NAME }}
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+        run: |
+          set -euo pipefail
+          TIMESTAMP=$(date +%s)
+          REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
+          echo "Creating remote release dir: $REMOTE_RELEASE_DIR"
+          ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${REMOTE_RELEASE_DIR}'"
+          scp -P "${VPS_PORT:-22}" ./${{ env.BIN_NAME }} "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
 
       - name: Install binary and restart service (remote)
-        run: |
-          TIMESTAMP=$(date +%s)
-          REMOTE_RELEASE_DIR="${{ secrets.REMOTE_DIR }}/releases/${TIMESTAMP}"
-          BIN_PATH="${{ secrets.REMOTE_DIR }}/${{ env.BIN_NAME }}"
-          echo "Set latest symlink -> $BIN_PATH"
-          ssh -p ${VPS_PORT:-22} ${VPS_USER}@${VPS_HOST} bash -lc "
-            set -euo pipefail
-
-            # ensure dirs exist
-            sudo mkdir -p '${{ secrets.REMOTE_DIR }}' '${{ secrets.REMOTE_DIR }}/releases'
-
-            # link the new binary
-            sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
-
-            # ensure executable and correct perms
-            sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
-            sudo chown -R root:root '${{ secrets.REMOTE_DIR }}'
-
-            # cleanup old releases (keep first KEEP_RELEASES)
-            cd '${{ secrets.REMOTE_DIR }}/releases'
-            ls -1t | tail -n +$(( ${{ env.KEEP_RELEASES }} + 1 )) | xargs -r sudo rm -rf --
-
-            # restart service
-            sudo systemctl daemon-reload || true
-            sudo systemctl restart '${{ secrets.SYSTEMD_SERVICE }}'
-
-            # show recent logs for the unit
-            sudo journalctl -u '${{ secrets.SYSTEMD_SERVICE }}' -n 120 --no-pager -o short-iso
-          "
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
+          REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
+          SYSTEMD_SERVICE: ${{ secrets.SYSTEMD_SERVICE }}
+        run: |
+          set -euo pipefail
+          TIMESTAMP=$(date +%s)
+          REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
+          BIN_PATH="${REMOTE_DIR}/${{ env.BIN_NAME }}"
+          ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" bash -lc "
+            set -euo pipefail
+            sudo mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/releases'
+            sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
+            sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
+            sudo chown -R root:root '${REMOTE_DIR}' || true
+            cd '${REMOTE_DIR}/releases'
+            ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
+            sudo systemctl daemon-reload || true
+            sudo systemctl restart '${SYSTEMD_SERVICE}'
+            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 120 --no-pager -o short-iso
+          "
