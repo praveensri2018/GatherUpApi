@@ -9,20 +9,30 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     env:
       BACKEND_DIR: backend/go
       BIN_NAME: gatherup-server
       KEEP_RELEASES: 5
 
     steps:
+      # ---------------------------------------------
+      # Checkout code
+      # ---------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---------------------------------------------
+      # Install Go
+      # ---------------------------------------------
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version: '1.21'
 
+      # ---------------------------------------------
+      # Cache modules
+      # ---------------------------------------------
       - name: Cache modules
         uses: actions/cache@v4
         with:
@@ -32,55 +42,66 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: ${{ runner.os }}-go-
 
+      # ---------------------------------------------
+      # Run tests
+      # ---------------------------------------------
       - name: Run tests
         run: |
+          echo "=== tell every time: running tests ==="
           cd ${{ env.BACKEND_DIR }}
           go test ./... -v
 
+      # ---------------------------------------------
+      # Build binary
+      # ---------------------------------------------
       - name: Build linux binary
         run: |
+          echo "=== tell every time: building binary ==="
           cd ${{ env.BACKEND_DIR }}
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -v -o ../${{ env.BIN_NAME }} ./cmd/server
           ls -l ../${{ env.BIN_NAME }}
 
+      # ---------------------------------------------
+      # Validate required secrets
+      # ---------------------------------------------
       - name: Validate required secrets
         run: |
           set -euo pipefail
-          # these expand before the script runs; check presence and fail with clear messages
-          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || { echo "Missing secret: VPS_SSH_KEY"; exit 1; }
-          [ -n "${{ secrets.VPS_HOST }}" ] || { echo "Missing secret: VPS_HOST"; exit 1; }
-          [ -n "${{ secrets.VPS_USER }}" ] || { echo "Missing secret: VPS_USER"; exit 1; }
-          [ -n "${{ secrets.REMOTE_DIR }}" ] || { echo "Missing secret: REMOTE_DIR"; exit 1; }
-          [ -n "${{ secrets.SYSTEMD_SERVICE }}" ] || { echo "Missing secret: SYSTEMD_SERVICE"; exit 1; }
-          echo "All required secrets present."
+          echo "=== tell every time: validating secrets ==="
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || { echo "Missing VPS_SSH_KEY"; exit 1; }
+          [ -n "${{ secrets.VPS_HOST }}" ] || { echo "Missing VPS_HOST"; exit 1; }
+          [ -n "${{ secrets.VPS_USER }}" ] || { echo "Missing VPS_USER"; exit 1; }
+          [ -n "${{ secrets.REMOTE_DIR }}" ] || { echo "Missing REMOTE_DIR"; exit 1; }
+          [ -n "${{ secrets.SYSTEMD_SERVICE }}" ] || { echo "Missing SYSTEMD_SERVICE"; exit 1; }
+          echo "=== tell every time: secrets ok ==="
 
+      # ---------------------------------------------
+      # SSH Agent
+      # ---------------------------------------------
       - name: Start ssh-agent and add private key
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
+      # ---------------------------------------------
+      # Add host key
+      # ---------------------------------------------
       - name: Add remote host to known_hosts (safe)
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
           set -euo pipefail
-          if [ -z "${VPS_HOST}" ]; then
-            echo "ERROR: VPS_HOST is empty. Set repository secret VPS_HOST to your server IP/hostname."
-            exit 1
-          fi
-
+          echo "=== tell every time: adding host to known_hosts ==="
           PORT="${VPS_PORT:-22}"
-          echo "Running ssh-keyscan -p ${PORT} ${VPS_HOST}"
-          # capture errors to a temp file so we can show a helpful message
-          if ! ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/tmp/sshkeyscan.err; then
-            echo "ssh-keyscan failed; last lines of error:"
-            tail -n 200 /tmp/sshkeyscan.err || true
-            echo "Ensure the host is reachable from GitHub Actions (no firewall) and VPS_HOST is correct."
-            exit 1
-          fi
-          echo "Host added to known_hosts."
 
+          ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts
+          echo "Host added: ${VPS_HOST}:${PORT}"
+          echo "=== tell every time: known_hosts step done ==="
+
+      # ---------------------------------------------
+      # SCP upload
+      # ---------------------------------------------
       - name: Copy binary to remote host (scp)
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -89,12 +110,31 @@ jobs:
           REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
         run: |
           set -euo pipefail
+          echo "=== tell every time: starting SCP upload ==="
+
           TIMESTAMP=$(date +%s)
           REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
-          echo "Creating remote release dir: $REMOTE_RELEASE_DIR"
-          ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${REMOTE_RELEASE_DIR}'"
-          scp -P "${VPS_PORT:-22}" ./${{ env.BIN_NAME }} "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
 
+          echo "Creating directory: $REMOTE_RELEASE_DIR"
+          if ! ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${REMOTE_RELEASE_DIR}'"; then
+            echo "ERROR: mkdir failed, gathering diagnostics..."
+            ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "
+              echo 'whoami:' \$(whoami)
+              echo 'id:' \$(id)
+              echo 'ls parent:'; ls -ld '${REMOTE_DIR}' || true
+            "
+            exit 1
+          fi
+
+          echo "Uploading binary..."
+          scp -P "${VPS_PORT:-22}" ./${{ env.BIN_NAME }} \
+            "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
+
+          echo "=== tell every time: SCP upload done ==="
+
+      # ---------------------------------------------
+      # Install release & restart service
+      # ---------------------------------------------
       - name: Install binary and restart service (remote)
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -104,18 +144,31 @@ jobs:
           SYSTEMD_SERVICE: ${{ secrets.SYSTEMD_SERVICE }}
         run: |
           set -euo pipefail
+          echo "=== tell every time: remote install step ==="
+
           TIMESTAMP=$(date +%s)
           REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
           BIN_PATH="${REMOTE_DIR}/${{ env.BIN_NAME }}"
+
           ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" bash -lc "
-            set -euo pipefail
+            echo '=== tell every time: remote start ==='
+            echo 'whoami:' \$(whoami)
+            echo 'id:' \$(id)
+
             sudo mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/releases'
+
             sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
             sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
             sudo chown -R root:root '${REMOTE_DIR}' || true
+
             cd '${REMOTE_DIR}/releases'
             ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
+
             sudo systemctl daemon-reload || true
             sudo systemctl restart '${SYSTEMD_SERVICE}'
-            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 120 --no-pager -o short-iso
+            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 80 --no-pager
+
+            echo '=== tell every time: remote done ==='
           "
+
+          echo "=== tell every time: install step finished ==="
