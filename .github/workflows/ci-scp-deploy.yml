@@ -17,18 +17,16 @@ jobs:
 
     steps:
       # ---------------------------------------------
-      # Checkout code
+      # Checkout
       # ---------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
 
       # ---------------------------------------------
-      # Set timestamp (single TS for upload + install)
+      # Generate ONE timestamp for upload + install
       # ---------------------------------------------
       - name: Set timestamp
-        run: |
-          echo "TS=$(date +%s)" >> $GITHUB_ENV
-          echo "TS set to $(date -d @$(date +%s) --utc || true) (epoch: $TS)"
+        run: echo "TS=$(date +%s)" >> $GITHUB_ENV
 
       # ---------------------------------------------
       # Install Go
@@ -55,112 +53,69 @@ jobs:
       # ---------------------------------------------
       - name: Run tests
         run: |
-          echo "=== tell every time: running tests ==="
           cd ${{ env.BACKEND_DIR }}
           go test ./... -v
 
       # ---------------------------------------------
-      # Build binary (place binary in repo root)
+      # Build binary
       # ---------------------------------------------
       - name: Build linux binary
         run: |
-          echo "=== tell every time: building binary (placing in repo root) ==="
           cd ${{ env.BACKEND_DIR }}
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -v -o ../../${{ env.BIN_NAME }} ./cmd/server
-          echo "=== tell every time: built binary should be at repo root: ./${{ env.BIN_NAME }} ==="
-          ls -l ../../${{ env.BIN_NAME }} || true
-          ls -al ..
+          ls -l ../../${{ env.BIN_NAME }}
 
       # ---------------------------------------------
-      # Validate required secrets
+      # Validate secrets
       # ---------------------------------------------
       - name: Validate required secrets
         run: |
-          set -euo pipefail
-          echo "=== tell every time: validating secrets ==="
-          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || { echo "Missing VPS_SSH_KEY"; exit 1; }
-          [ -n "${{ secrets.VPS_HOST }}" ] || { echo "Missing VPS_HOST"; exit 1; }
-          [ -n "${{ secrets.VPS_USER }}" ] || { echo "Missing VPS_USER"; exit 1; }
-          [ -n "${{ secrets.REMOTE_DIR }}" ] || { echo "Missing REMOTE_DIR"; exit 1; }
-          [ -n "${{ secrets.SYSTEMD_SERVICE }}" ] || { echo "Missing SYSTEMD_SERVICE"; exit 1; }
-          echo "=== tell every time: secrets ok ==="
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || exit 1
+          [ -n "${{ secrets.VPS_HOST }}" ] || exit 1
+          [ -n "${{ secrets.VPS_USER }}" ] || exit 1
+          [ -n "${{ secrets.REMOTE_DIR }}" ] || exit 1
+          [ -n "${{ secrets.SYSTEMD_SERVICE }}" ] || exit 1
+          echo "Secrets OK"
 
       # ---------------------------------------------
       # SSH Agent
       # ---------------------------------------------
-      - name: Start ssh-agent and add private key
+      - name: Start ssh-agent
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       # ---------------------------------------------
-      # Add remote host to known_hosts (safe)
+      # Add remote host to known_hosts
       # ---------------------------------------------
-      - name: Add remote host to known_hosts (safe)
-        env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_PORT: ${{ secrets.VPS_PORT }}
+      - name: Add remote host to known_hosts
         run: |
-          set -euo pipefail
-          echo "=== tell every time: adding host to known_hosts ==="
-          PORT="${VPS_PORT:-22}"
-          ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts
-          echo "Host added: ${VPS_HOST}:${PORT}"
-          echo "=== tell every time: known_hosts step done ==="
+          PORT=${{ secrets.VPS_PORT || '22' }}
+          ssh-keyscan -p "$PORT" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
       # ---------------------------------------------
-      # Debug listing before SCP (confirm binary location)
+      # Upload binary to server
       # ---------------------------------------------
-      - name: List workspace and backend to confirm binary
-        run: |
-          echo "=== tell every time: list repo root (expect ./${{ env.BIN_NAME }}) ==="
-          ls -al .
-          echo "=== tell every time: list backend dir (for reference) ==="
-          ls -al ${{ env.BACKEND_DIR }} || true
-
-      # ---------------------------------------------
-      # SCP upload (uploads ./gatherup-server from repo root)
-      # ---------------------------------------------
-      - name: Copy binary to remote host (scp)
+      - name: Upload binary via SCP
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
         run: |
-          set -euo pipefail
-          echo "=== tell every time: starting SCP upload ==="
+          TS=${TS}
+          PORT="${VPS_PORT:-22}"
+          LOCAL="./${{ env.BIN_NAME }}"
+          DIR="${REMOTE_DIR}/releases/${TS}"
 
-          LOCAL_BINARY="./${{ env.BIN_NAME }}"
-          echo "=== tell every time: local binary path used by SCP: ${LOCAL_BINARY} ==="
-          test -f "${LOCAL_BINARY}" || { echo "ERROR: local binary not found at ${LOCAL_BINARY}"; ls -al .; exit 1; }
-
-          # Use the shared timestamp set earlier
-          TIMESTAMP="${TS}"
-          REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
-
-          echo "Creating directory on remote: ${REMOTE_RELEASE_DIR}"
-          if ! ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${REMOTE_RELEASE_DIR}'"; then
-            echo "ERROR: mkdir failed, gathering diagnostics..."
-            ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "
-              echo 'whoami:' \$(whoami)
-              echo 'id:' \$(id)
-              echo 'ls parent:'; ls -ld '${REMOTE_DIR}' || true
-            "
-            exit 1
-          fi
-
-          echo "Uploading binary to ${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }} ..."
-          scp -P "${VPS_PORT:-22}" "${LOCAL_BINARY}" \
-            "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
-
-          echo "=== tell every time: SCP upload done ==="
+          ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" "mkdir -p '$DIR'"
+          scp -P "$PORT" "$LOCAL" "${VPS_USER}@${VPS_HOST}:'$DIR/${{ env.BIN_NAME }}'"
 
       # ---------------------------------------------
-      # Install release & restart service
+      # Install + Symlink + Restart service
       # ---------------------------------------------
-      - name: Install binary and restart service (remote)
+      - name: Install binary & restart service
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -169,42 +124,18 @@ jobs:
           SYSTEMD_SERVICE: ${{ secrets.SYSTEMD_SERVICE }}
           KEEP_RELEASES: ${{ env.KEEP_RELEASES }}
         run: |
-          set -euo pipefail
-          echo "=== tell every time: remote install step ==="
+          TS=${TS}
+          PORT="${VPS_PORT:-22}"
+          DIR="${REMOTE_DIR}/releases/${TS}"
+          BIN="${REMOTE_DIR}/${{ env.BIN_NAME }}"
 
-          # Use the same shared timestamp
-          TIMESTAMP="${TS}"
-          REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
-          BIN_PATH="${REMOTE_DIR}/${{ env.BIN_NAME }}"
-
-          ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" bash -lc "
-            set -euo pipefail
-            echo '=== tell every time: remote start ==='
-            echo 'whoami:' \$(whoami)
-            echo 'id:' \$(id)
-
-            sudo mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/releases'
-
-            # Link the file we uploaded earlier
-            if [ ! -f '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' ]; then
-              echo 'ERROR: expected binary not found at ${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
-              echo 'Listing ${REMOTE_DIR}/releases:'
-              ls -la '${REMOTE_DIR}/releases' || true
-              exit 1
-            fi
-
-            sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
-            sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
-            sudo chown -R root:root '${REMOTE_DIR}' || true
-
+          ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" bash -lc "
+            sudo ln -sfn '$DIR/${{ env.BIN_NAME }}' '$BIN'
+            sudo chmod +x '$DIR/${{ env.BIN_NAME }}'
+            sudo chown -R root:root '${REMOTE_DIR}'
             cd '${REMOTE_DIR}/releases'
             ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
-
-            sudo systemctl daemon-reload || true
+            sudo systemctl daemon-reload
             sudo systemctl restart '${SYSTEMD_SERVICE}'
-            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 80 --no-pager || true
-
-            echo '=== tell every time: remote done ==='
+            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 50 --no-pager
           "
-
-          echo "=== tell every time: install step finished ==="
