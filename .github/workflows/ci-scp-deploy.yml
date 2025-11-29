@@ -23,6 +23,14 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------------------------
+      # Set timestamp (single TS for upload + install)
+      # ---------------------------------------------
+      - name: Set timestamp
+        run: |
+          echo "TS=$(date +%s)" >> $GITHUB_ENV
+          echo "TS set to $(date -d @$(date +%s) --utc || true) (epoch: $TS)"
+
+      # ---------------------------------------------
       # Install Go
       # ---------------------------------------------
       - name: Set up Go
@@ -49,7 +57,6 @@ jobs:
         run: |
           echo "=== tell every time: running tests ==="
           cd ${{ env.BACKEND_DIR }}
-          # Place: tests run from backend/go
           go test ./... -v
 
       # ---------------------------------------------
@@ -59,13 +66,10 @@ jobs:
         run: |
           echo "=== tell every time: building binary (placing in repo root) ==="
           cd ${{ env.BACKEND_DIR }}
-          # Place: working dir = backend/go
-          # Place: build target is ../../${{ env.BIN_NAME }} which is repo root ./${{ env.BIN_NAME }}
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
             go build -v -o ../../${{ env.BIN_NAME }} ./cmd/server
           echo "=== tell every time: built binary should be at repo root: ./${{ env.BIN_NAME }} ==="
           ls -l ../../${{ env.BIN_NAME }} || true
-          echo "=== tell every time: listing repo root to confirm binary presence ==="
           ls -al ..
 
       # ---------------------------------------------
@@ -110,7 +114,7 @@ jobs:
       # ---------------------------------------------
       - name: List workspace and backend to confirm binary
         run: |
-          echo "=== tell every time: list repo root (expect ./{{ env.BIN_NAME }}) ==="
+          echo "=== tell every time: list repo root (expect ./${{ env.BIN_NAME }}) ==="
           ls -al .
           echo "=== tell every time: list backend dir (for reference) ==="
           ls -al ${{ env.BACKEND_DIR }} || true
@@ -128,15 +132,15 @@ jobs:
           set -euo pipefail
           echo "=== tell every time: starting SCP upload ==="
 
-          # Place: scp expects local file at repo root: ./${{ env.BIN_NAME }}
           LOCAL_BINARY="./${{ env.BIN_NAME }}"
           echo "=== tell every time: local binary path used by SCP: ${LOCAL_BINARY} ==="
           test -f "${LOCAL_BINARY}" || { echo "ERROR: local binary not found at ${LOCAL_BINARY}"; ls -al .; exit 1; }
 
-          TIMESTAMP=$(date +%s)
+          # Use the shared timestamp set earlier
+          TIMESTAMP="${TS}"
           REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
 
-          echo "Creating directory: $REMOTE_RELEASE_DIR"
+          echo "Creating directory on remote: ${REMOTE_RELEASE_DIR}"
           if ! ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${REMOTE_RELEASE_DIR}'"; then
             echo "ERROR: mkdir failed, gathering diagnostics..."
             ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" "
@@ -147,7 +151,7 @@ jobs:
             exit 1
           fi
 
-          echo "Uploading binary..."
+          echo "Uploading binary to ${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }} ..."
           scp -P "${VPS_PORT:-22}" "${LOCAL_BINARY}" \
             "${VPS_USER}@${VPS_HOST}:${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}"
 
@@ -163,22 +167,32 @@ jobs:
           VPS_PORT: ${{ secrets.VPS_PORT }}
           REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
           SYSTEMD_SERVICE: ${{ secrets.SYSTEMD_SERVICE }}
+          KEEP_RELEASES: ${{ env.KEEP_RELEASES }}
         run: |
           set -euo pipefail
           echo "=== tell every time: remote install step ==="
 
-          TIMESTAMP=$(date +%s)
+          # Use the same shared timestamp
+          TIMESTAMP="${TS}"
           REMOTE_RELEASE_DIR="${REMOTE_DIR}/releases/${TIMESTAMP}"
           BIN_PATH="${REMOTE_DIR}/${{ env.BIN_NAME }}"
 
           ssh -p "${VPS_PORT:-22}" "${VPS_USER}@${VPS_HOST}" bash -lc "
+            set -euo pipefail
             echo '=== tell every time: remote start ==='
             echo 'whoami:' \$(whoami)
             echo 'id:' \$(id)
 
             sudo mkdir -p '${REMOTE_DIR}' '${REMOTE_DIR}/releases'
 
-            # Place: remote release file will be at ${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}
+            # Link the file we uploaded earlier
+            if [ ! -f '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' ]; then
+              echo 'ERROR: expected binary not found at ${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
+              echo 'Listing ${REMOTE_DIR}/releases:'
+              ls -la '${REMOTE_DIR}/releases' || true
+              exit 1
+            fi
+
             sudo ln -sfn '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}' '${BIN_PATH}'
             sudo chmod +x '${REMOTE_RELEASE_DIR}/${{ env.BIN_NAME }}'
             sudo chown -R root:root '${REMOTE_DIR}' || true
@@ -188,7 +202,7 @@ jobs:
 
             sudo systemctl daemon-reload || true
             sudo systemctl restart '${SYSTEMD_SERVICE}'
-            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 80 --no-pager
+            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 80 --no-pager || true
 
             echo '=== tell every time: remote done ==='
           "
