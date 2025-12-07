@@ -103,15 +103,15 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
-        run: |
-          TS=${TS}
-          PORT="${VPS_PORT:-22}"
-          LOCAL="./${{ env.BIN_NAME }}"
-          DIR="${REMOTE_DIR}/releases/${TS}"
-          echo "Creating remote dir: ${DIR}"
-          ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${DIR}'"
-          echo "Uploading ${LOCAL} -> ${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
-          scp -P "$PORT" "${LOCAL}" "${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
+          run: |
+            TS=${TS}
+            PORT="${VPS_PORT:-22}"
+            LOCAL="./${{ env.BIN_NAME }}"
+            DIR="${REMOTE_DIR}/releases/${TS}"
+            echo "Creating remote dir: ${DIR}"
+            ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${DIR}'"
+            echo "Uploading ${LOCAL} -> ${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
+            scp -P "$PORT" "${LOCAL}" "${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
 
       # ---------------------------------------------
       # Install + Symlink + Restart service
@@ -131,11 +131,11 @@ jobs:
           BIN="${REMOTE_DIR}/${{ env.BIN_NAME }}"
 
           ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" bash -lc "
-          sudo ln -sfn '$DIR/${{ env.BIN_NAME }}' '$BIN'
-          sudo chmod +x '$DIR/${{ env.BIN_NAME }}'
-          cd '${REMOTE_DIR}/releases'
-          ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
-          sudo systemctl daemon-reload
-          sudo systemctl restart '${SYSTEMD_SERVICE}'
-          sudo journalctl -u '${SYSTEMD_SERVICE}' -n 50 --no-pager
+            sudo ln -sfn '$DIR/${{ env.BIN_NAME }}' '$BIN'
+            sudo chmod +x '$DIR/${{ env.BIN_NAME }}'
+            cd '${REMOTE_DIR}/releases'
+            ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
+            sudo systemctl daemon-reload
+            sudo systemctl restart '${SYSTEMD_SERVICE}'
+            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 50 --no-pager
           "
