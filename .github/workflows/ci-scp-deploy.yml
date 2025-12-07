@@ -103,15 +103,17 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
           REMOTE_DIR: ${{ secrets.REMOTE_DIR }}
-          run: |
-            TS=${TS}
-            PORT="${VPS_PORT:-22}"
-            LOCAL="./${{ env.BIN_NAME }}"
-            DIR="${REMOTE_DIR}/releases/${TS}"
-            echo "Creating remote dir: ${DIR}"
-            ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${DIR}'"
-            echo "Uploading ${LOCAL} -> ${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
-            scp -P "$PORT" "${LOCAL}" "${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
+        run: |
+          TS=${TS}
+          PORT="${VPS_PORT:-22}"
+          LOCAL="./${{ env.BIN_NAME }}"
+          DIR="${REMOTE_DIR}/releases/${TS}"
+
+          echo "Creating remote dir: ${DIR}"
+          ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" "mkdir -p '${DIR}'"
+
+          echo "Uploading ${LOCAL} -> ${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
+          scp -P "$PORT" "${LOCAL}" "${VPS_USER}@${VPS_HOST}:${DIR}/${{ env.BIN_NAME }}"
 
       # ---------------------------------------------
       # Install + Symlink + Restart service
