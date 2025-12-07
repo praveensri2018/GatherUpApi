@@ -131,12 +131,11 @@ jobs:
           BIN="${REMOTE_DIR}/${{ env.BIN_NAME }}"
 
           ssh -p "$PORT" "${VPS_USER}@${VPS_HOST}" bash -lc "
-            sudo ln -sfn '$DIR/${{ env.BIN_NAME }}' '$BIN'
-            sudo chmod +x '$DIR/${{ env.BIN_NAME }}'
-            sudo chown -R root:root '${REMOTE_DIR}'
-            cd '${REMOTE_DIR}/releases'
-            ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
-            sudo systemctl daemon-reload
-            sudo systemctl restart '${SYSTEMD_SERVICE}'
-            sudo journalctl -u '${SYSTEMD_SERVICE}' -n 50 --no-pager
+          sudo ln -sfn '$DIR/${{ env.BIN_NAME }}' '$BIN'
+          sudo chmod +x '$DIR/${{ env.BIN_NAME }}'
+          cd '${REMOTE_DIR}/releases'
+          ls -1t | tail -n +$(( ${KEEP_RELEASES} + 1 )) | xargs -r sudo rm -rf --
+          sudo systemctl daemon-reload
+          sudo systemctl restart '${SYSTEMD_SERVICE}'
+          sudo journalctl -u '${SYSTEMD_SERVICE}' -n 50 --no-pager
           "
