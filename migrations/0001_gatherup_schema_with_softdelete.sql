@@ -921,3 +921,10 @@ BEGIN
   CREATE INDEX idx_refresh_tokens_hash ON dbo.refresh_tokens(token_hash);
 END
 GO
+
+
+ALTER TABLE dbo.refresh_tokens
+ADD last_used_at datetime2 NULL,
+    device_fingerprint nvarchar(255) NULL;
+
+	

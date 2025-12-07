@@ -1,5 +1,4 @@
-﻿/* Place: backend/go/service/auth_service.go */
-package service
+﻿package service
 
 import (
 	"context"
@@ -11,7 +10,6 @@ import (
 	"gatherup/repository"
 )
 
-// Exported config so other packages (cmd/server) can construct it.
 type AuthConfig struct {
 	BcryptCost        int
 	RefreshTokenBytes int
@@ -31,8 +29,6 @@ func NewAuthService(repo *repository.UserRepo, jwtMgr *auth.JWTManager, cfg *Aut
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrRefreshTokenNotFound = errors.New("refresh token not found or revoked/expired")
 
-// NormalizeMobile removes non-digit characters except leading +.
-// Keep this small helper here for phase-1; consider moving to a shared util package later.
 func NormalizeMobile(m string) string {
 	if m == "" {
 		return ""
@@ -49,14 +45,12 @@ func NormalizeMobile(m string) string {
 	return sb.String()
 }
 
-// Register creates a user with hashed password using user_credentials (not on users table).
 func (s *AuthService) Register(ctx context.Context, mobile, password string) (string, error) {
 	if mobile == "" || password == "" {
 		return "", errors.New("mobile and password are required")
 	}
 	mobileNorm := NormalizeMobile(mobile)
 
-	// check existing credential (by normalized mobile)
 	uid, _, err := s.repo.GetCredentialByIdentifier(ctx, mobileNorm)
 	if err != nil {
 		return "", err
@@ -70,7 +64,6 @@ func (s *AuthService) Register(ctx context.Context, mobile, password string) (st
 		return "", err
 	}
 
-	// create user row and credential row in a single transaction
 	userID, err := s.repo.CreateUserWithPassword(ctx, mobile, mobileNorm, phash)
 	if err != nil {
 		return "", err
@@ -78,7 +71,6 @@ func (s *AuthService) Register(ctx context.Context, mobile, password string) (st
 	return userID, nil
 }
 
-// Login verifies credentials and issues tokens.
 func (s *AuthService) Login(ctx context.Context, mobile, password, deviceInfo string) (accessToken string, accessExp time.Time, refreshRaw string, refreshExpiry time.Time, err error) {
 	if mobile == "" || password == "" {
 		err = ErrInvalidCredentials
@@ -114,7 +106,6 @@ func (s *AuthService) Login(ctx context.Context, mobile, password, deviceInfo st
 	return accessToken, accessExp, raw, expiry, nil
 }
 
-// Refresh validates provided refresh token, rotates it and returns new tokens.
 func (s *AuthService) Refresh(ctx context.Context, raw string) (newAccess string, accessExp time.Time, newRaw string, newExpiry time.Time, err error) {
 	if raw == "" {
 		return "", time.Time{}, "", time.Time{}, ErrRefreshTokenNotFound
@@ -130,6 +121,7 @@ func (s *AuthService) Refresh(ctx context.Context, raw string) (newAccess string
 	if time.Now().UTC().After(row.ExpiresAt) {
 		return "", time.Time{}, "", time.Time{}, ErrRefreshTokenNotFound
 	}
+	// mark last_used and then rotate
 	newAccess, accessExp, err = s.jwtManager.Generate(row.UserID, nil)
 	if err != nil {
 		return "", time.Time{}, "", time.Time{}, err
@@ -143,4 +135,19 @@ func (s *AuthService) Refresh(ctx context.Context, raw string) (newAccess string
 		return "", time.Time{}, "", time.Time{}, err
 	}
 	return newAccess, accessExp, newRaw, newExpiry, nil
+}
+
+func (s *AuthService) Revoke(ctx context.Context, raw string) error {
+	if raw == "" {
+		return ErrRefreshTokenNotFound
+	}
+	hash := auth.HashRefreshToken(raw)
+	row, err := s.repo.GetRefreshTokenRow(ctx, hash)
+	if err != nil {
+		return err
+	}
+	if row == nil {
+		return ErrRefreshTokenNotFound
+	}
+	return s.repo.RevokeRefreshToken(ctx, row.ID)
 }

@@ -26,13 +26,14 @@ type UserRepo struct {
 
 // RefreshTokenRow is a lightweight struct representing refresh_tokens row.
 type RefreshTokenRow struct {
-	ID        string
-	UserID    string
-	TokenHash string
-	Device    *string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Revoked   bool
+	ID         string
+	UserID     string
+	TokenHash  string
+	Device     *string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	Revoked    bool
+	LastUsedAt *time.Time
 }
 
 // NewUserRepo constructs a UserRepo. You may provide nil loggers to use defaults
@@ -284,7 +285,6 @@ func (r *UserRepo) GetCredentialByIdentifier(ctx context.Context, identifier str
 
 // SaveRefreshToken stores refresh token hash. Validates userID before DB write.
 func (r *UserRepo) SaveRefreshToken(ctx context.Context, userID, tokenHash string, device *string, expiresAt time.Time) (string, error) {
-	// validate userID is a UUID before DB write
 	if _, err := uuid.Parse(userID); err != nil {
 		r.errorLogger.Printf("SaveRefreshToken: invalid user id format: %v (userID=%q len=%d)", err, userID, len(userID))
 		return "", fmt.Errorf("invalid user id format: %w", err)
@@ -293,14 +293,13 @@ func (r *UserRepo) SaveRefreshToken(ctx context.Context, userID, tokenHash strin
 	id := uuid.New().String()
 	now := time.Now().UTC()
 
-	// Log shape only (do NOT log real token contents)
 	r.infoLogger.Printf("SaveRefreshToken: creating id=%s userID=%s devicePresent=%v expiresAt=%v",
 		id, userID, device != nil && *device != "", expiresAt)
 
 	_, err := r.db.ExecContext(ctx, `
-        INSERT INTO dbo.refresh_tokens (id, user_id, token_hash, device_info, created_at, expires_at, is_revoked)
-        VALUES (@p1, @p2, @p3, @p4, @p5, @p6, 0)
-    `, id, userID, tokenHash, device, now, expiresAt)
+        INSERT INTO dbo.refresh_tokens (id, user_id, token_hash, device_info, created_at, expires_at, is_revoked, last_used_at)
+        VALUES (@p1, @p2, @p3, @p4, @p5, @p6, 0, @p7)
+    `, id, userID, tokenHash, device, now, expiresAt, now)
 	if err != nil {
 		r.errorLogger.Printf("SaveRefreshToken: exec failed id=%s userID=%s err=%v", id, userID, err)
 		return "", fmt.Errorf("save refresh token failed: %w", err)
@@ -312,20 +311,20 @@ func (r *UserRepo) SaveRefreshToken(ctx context.Context, userID, tokenHash strin
 
 // GetRefreshTokenRow finds a refresh token by hash
 func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*RefreshTokenRow, error) {
-	// ask SQL Server to return canonical strings for both id and user_id
 	row := r.db.QueryRowContext(ctx, `
         SELECT CONVERT(nvarchar(36), id) as id,
                CONVERT(nvarchar(36), user_id) as user_id,
-               token_hash, device_info, created_at, expires_at, is_revoked
-        FROM dbo.refresh_tokens WHERE token_hash = @p1
+               token_hash, device_info, created_at, expires_at, is_revoked, last_used_at
+        FROM dbo.refresh_tokens WHERE token_hash = @p1 AND is_revoked = 0 AND expires_at > SYSUTCDATETIME()
     `, tokenHash)
 
 	var rr RefreshTokenRow
 	var device sql.NullString
 	var uid sql.NullString
 	var idStr sql.NullString
+	var lastUsed sql.NullTime
 
-	if err := row.Scan(&idStr, &uid, &rr.TokenHash, &device, &rr.CreatedAt, &rr.ExpiresAt, &rr.Revoked); err != nil {
+	if err := row.Scan(&idStr, &uid, &rr.TokenHash, &device, &rr.CreatedAt, &rr.ExpiresAt, &rr.Revoked, &lastUsed); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			r.infoLogger.Printf("GetRefreshTokenRow: not found tokenHashLen=%d", len(tokenHash))
 			return nil, nil
@@ -346,7 +345,6 @@ func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*R
 
 	if uid.Valid {
 		rr.UserID = uid.String
-		// defensive validation
 		if _, err := uuid.Parse(rr.UserID); err != nil {
 			r.errorLogger.Printf("GetRefreshTokenRow: invalid user id in row rr.ID=%s userID=%q err=%v", rr.ID, rr.UserID, err)
 			return nil, fmt.Errorf("invalid user id in refresh token row: %w", err)
@@ -356,7 +354,11 @@ func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*R
 		return nil, fmt.Errorf("refresh token row missing user id")
 	}
 
-	// validate returned id is a UUID
+	if lastUsed.Valid {
+		t := lastUsed.Time
+		rr.LastUsedAt = &t
+	}
+
 	if _, err := uuid.Parse(rr.ID); err != nil {
 		r.errorLogger.Printf("GetRefreshTokenRow: invalid id in row rr.ID=%q err=%v", rr.ID, err)
 		return nil, fmt.Errorf("invalid refresh token id: %w", err)
@@ -367,23 +369,7 @@ func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*R
 }
 
 // RevokeRefreshToken marks a refresh token revoked
-func (r *UserRepo) RevokeRefreshToken(ctx context.Context, id string) error {
-	if _, err := uuid.Parse(id); err != nil {
-		r.errorLogger.Printf("RevokeRefreshToken: invalid id format=%q err=%v", id, err)
-		return fmt.Errorf("invalid id: %w", err)
-	}
-	_, err := r.db.ExecContext(ctx, `UPDATE dbo.refresh_tokens SET is_revoked = 1 WHERE id = @p1`, id)
-	if err != nil {
-		r.errorLogger.Printf("RevokeRefreshToken: exec failed id=%s err=%v", id, err)
-		return err
-	}
-	r.infoLogger.Printf("RevokeRefreshToken: revoked id=%s", id)
-	return nil
-}
-
-// RotateRefreshToken revokes old and inserts a new token in a transaction
 func (r *UserRepo) RotateRefreshToken(ctx context.Context, oldID, newTokenHash string, newExpiry time.Time) (string, error) {
-	// validate IDs
 	if _, err := uuid.Parse(oldID); err != nil {
 		r.errorLogger.Printf("RotateRefreshToken: invalid oldID=%q err=%v", oldID, err)
 		return "", fmt.Errorf("invalid old id: %w", err)
@@ -401,15 +387,15 @@ func (r *UserRepo) RotateRefreshToken(ctx context.Context, oldID, newTokenHash s
 		}
 	}()
 
-	if _, err := tx.ExecContext(ctx, `UPDATE dbo.refresh_tokens SET is_revoked = 1 WHERE id = @p1`, oldID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE dbo.refresh_tokens SET is_revoked = 1, last_used_at = SYSUTCDATETIME() WHERE id = @p1`, oldID); err != nil {
 		r.errorLogger.Printf("RotateRefreshToken: revoke old failed oldID=%s err=%v", oldID, err)
 		return "", err
 	}
 	newID := uuid.New().String()
-	// use CONVERT to ensure user_id is inserted as canonical nvarchar(36)
+
 	if _, err := tx.ExecContext(ctx, `
-        INSERT INTO dbo.refresh_tokens (id, user_id, token_hash, created_at, expires_at, is_revoked)
-        SELECT @p1, CONVERT(nvarchar(36), user_id), @p2, SYSUTCDATETIME(), @p3, 0 FROM dbo.refresh_tokens WHERE id = @p4
+        INSERT INTO dbo.refresh_tokens (id, user_id, token_hash, device_info, created_at, expires_at, is_revoked, last_used_at)
+        SELECT @p1, CONVERT(nvarchar(36), user_id), @p2, device_info, SYSUTCDATETIME(), @p3, 0, SYSUTCDATETIME() FROM dbo.refresh_tokens WHERE id = @p4
     `, newID, newTokenHash, newExpiry, oldID); err != nil {
 		r.errorLogger.Printf("RotateRefreshToken: insert new failed oldID=%s newID=%s err=%v", oldID, newID, err)
 		return "", err
@@ -421,6 +407,20 @@ func (r *UserRepo) RotateRefreshToken(ctx context.Context, oldID, newTokenHash s
 	committed = true
 	r.infoLogger.Printf("RotateRefreshToken: rotated oldID=%s -> newID=%s", oldID, newID)
 	return newID, nil
+}
+
+func (r *UserRepo) RevokeRefreshToken(ctx context.Context, id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		r.errorLogger.Printf("RevokeRefreshToken: invalid id format=%q err=%v", id, err)
+		return fmt.Errorf("invalid id: %w", err)
+	}
+	_, err := r.db.ExecContext(ctx, `UPDATE dbo.refresh_tokens SET is_revoked = 1, last_used_at = SYSUTCDATETIME() WHERE id = @p1`, id)
+	if err != nil {
+		r.errorLogger.Printf("RevokeRefreshToken: exec failed id=%s err=%v", id, err)
+		return err
+	}
+	r.infoLogger.Printf("RevokeRefreshToken: revoked id=%s", id)
+	return nil
 }
 
 /* helper for optional sql.NullString building from *string */

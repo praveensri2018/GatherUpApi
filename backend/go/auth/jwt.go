@@ -1,5 +1,4 @@
-﻿/* Place: backend/go/auth/jwt.go */
-package auth
+﻿package auth
 
 import (
 	"errors"
@@ -19,7 +18,6 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// NewJWTManager creates JWT manager with HMAC secret and TTL.
 func NewJWTManager(secret string, ttl time.Duration) *JWTManager {
 	return &JWTManager{
 		secret: []byte(secret),
@@ -27,7 +25,6 @@ func NewJWTManager(secret string, ttl time.Duration) *JWTManager {
 	}
 }
 
-// Generate creates a signed JWT string and returns expiry.
 func (m *JWTManager) Generate(userID string, roles []string) (string, time.Time, error) {
 	now := time.Now().UTC()
 	exp := now.Add(m.ttl)
@@ -48,7 +45,6 @@ func (m *JWTManager) Generate(userID string, roles []string) (string, time.Time,
 	return ss, exp, nil
 }
 
-// Verify parses and validates a token and returns claims.
 func (m *JWTManager) Verify(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

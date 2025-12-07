@@ -1,5 +1,4 @@
-﻿/* Place: backend/go/api/routes.go */
-package api
+﻿package api
 
 import (
 	"net/http"
@@ -11,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// WireRouter wires handlers and middleware; pass in repo, jwt manager and auth service
 func WireRouter(repo *repository.UserRepo, jwtMgr *auth.JWTManager, authSvc *service.AuthService) http.Handler {
 	r := chi.NewRouter()
 
@@ -26,10 +24,14 @@ func WireRouter(repo *repository.UserRepo, jwtMgr *auth.JWTManager, authSvc *ser
 	authHandler := NewAuthHandler(authSvc)
 	userHandler := NewUserHandler(repo)
 
-	r.Post("/auth/register", authHandler.Register)
-	r.Post("/auth/login", authHandler.Login)
-	r.Post("/auth/refresh", authHandler.Refresh)
+	// Auth endpoints - rate limited
+	// Rate: 0.2 tokens/sec (1 per 5s), burst 5
+	r.Post("/auth/register", RateLimitAuth(0.2, 5)(http.HandlerFunc(authHandler.Register)).ServeHTTP)
+	r.Post("/auth/login", RateLimitAuth(0.2, 5)(http.HandlerFunc(authHandler.Login)).ServeHTTP)
+	r.Post("/auth/refresh", RateLimitAuth(0.5, 10)(http.HandlerFunc(authHandler.Refresh)).ServeHTTP)
+	r.Post("/auth/revoke", RateLimitAuth(0.5, 10)(http.HandlerFunc(authHandler.Revoke)).ServeHTTP)
 
+	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(WithAuth(verifyFn))
 		r.Get("/api/me", userHandler.Me)

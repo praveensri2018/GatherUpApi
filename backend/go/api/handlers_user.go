@@ -1,5 +1,4 @@
-﻿/* Place: backend/go/api/handlers_user.go */
-package api
+﻿package api
 
 import (
 	"encoding/json"
@@ -16,20 +15,19 @@ func NewUserHandler(repo *repository.UserRepo) *UserHandler {
 	return &UserHandler{repo: repo}
 }
 
-// GET /api/me
 func (h *UserHandler) Me(w http.ResponseWriter, r *http.Request) {
 	userID, ok := FromContextUserID(r.Context())
 	if !ok || userID == "" {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		ErrorJSON(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	u, err := h.repo.GetByID(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "failed to fetch user", http.StatusInternalServerError)
+		ErrorJSON(w, http.StatusInternalServerError, "failed to fetch user")
 		return
 	}
 	if u == nil {
-		http.Error(w, "user not found", http.StatusNotFound)
+		ErrorJSON(w, http.StatusNotFound, "user not found")
 		return
 	}
 	resp := map[string]interface{}{

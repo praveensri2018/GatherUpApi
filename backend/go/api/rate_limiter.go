@@ -1,41 +1,48 @@
-// backend/go/api/rate_limiter.go
 package api
 
 import (
+	"math"
 	"net/http"
 	"sync"
 	"time"
 )
 
-type simpleBucket struct {
-	last time.Time
-	mu   sync.Mutex
+// tokenBucket per client
+type tokenBucket struct {
+	mu       sync.Mutex
+	tokens   float64
+	last     time.Time
+	rate     float64
+	capacity float64
 }
 
-var authBuckets = map[string]*simpleBucket{}
-var authBucketsMu sync.Mutex
+var buckets sync.Map // map[string]*tokenBucket
 
-// Limit to N requests per IP per window (very simple)
-func RateLimitAuth(window time.Duration, max int) func(http.Handler) http.Handler {
+// RateLimitAuth returns middleware that limits requests per client (ip or forwarded).
+// rate: tokens per second, capacity: burst capacity.
+func RateLimitAuth(rate float64, capacity float64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr // production: use real IP parsing / X-Forwarded-For
-			authBucketsMu.Lock()
-			b, ok := authBuckets[ip]
-			if !ok {
-				b = &simpleBucket{last: time.Now()}
-				authBuckets[ip] = b
-			}
-			authBucketsMu.Unlock()
+			ip := clientIP(r)
+			now := time.Now()
+			v, _ := buckets.LoadOrStore(ip, &tokenBucket{
+				tokens:   capacity,
+				last:     now,
+				rate:     rate,
+				capacity: capacity,
+			})
+			b := v.(*tokenBucket)
 
 			b.mu.Lock()
-			if time.Since(b.last) < window {
-				// simple: allow 1 per window; extend per needs
+			elapsed := now.Sub(b.last).Seconds()
+			b.tokens = math.Min(b.capacity, b.tokens+elapsed*b.rate)
+			b.last = now
+			if b.tokens < 1 {
 				b.mu.Unlock()
 				ErrorJSON(w, http.StatusTooManyRequests, "rate limit exceeded")
 				return
 			}
-			b.last = time.Now()
+			b.tokens -= 1
 			b.mu.Unlock()
 
 			next.ServeHTTP(w, r)
