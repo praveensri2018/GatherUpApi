@@ -165,3 +165,102 @@ func (h *AuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// POST /auth/forgot/send-otp
+func (h *AuthHandler) SendForgotOTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req simpleReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.MobileOrEmail == "" {
+		ErrorJSON(w, http.StatusBadRequest, "mobile_or_email required")
+		return
+	}
+	if !mobileRe.MatchString(req.MobileOrEmail) {
+		ErrorJSON(w, http.StatusBadRequest, "invalid mobile_or_email format")
+		return
+	}
+
+	if err := h.svc.SendForgotOTP(ctx, req.MobileOrEmail); err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			// You can choose 404 or 200 with generic message; keeping 404 here.
+			ErrorJSON(w, http.StatusNotFound, "user not found")
+		default:
+			ErrorJSON(w, http.StatusInternalServerError, "failed to send otp")
+		}
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// POST /auth/forgot/verify-otp
+func (h *AuthHandler) VerifyForgotOTP(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req simpleReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.MobileOrEmail == "" || req.OTP == "" {
+		ErrorJSON(w, http.StatusBadRequest, "mobile_or_email and otp required")
+		return
+	}
+
+	if err := h.svc.VerifyForgotOTP(ctx, req.MobileOrEmail, req.OTP); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidOTP):
+			ErrorJSON(w, http.StatusBadRequest, "invalid otp")
+		case errors.Is(err, service.ErrOTPExpired):
+			ErrorJSON(w, http.StatusBadRequest, "otp expired")
+		case errors.Is(err, service.ErrOTPNotFound):
+			ErrorJSON(w, http.StatusBadRequest, "otp not found")
+		default:
+			ErrorJSON(w, http.StatusInternalServerError, "verify otp failed")
+		}
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+// POST /auth/forgot/reset
+func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req simpleReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorJSON(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	if req.MobileOrEmail == "" || req.NewPassword == "" {
+		ErrorJSON(w, http.StatusBadRequest, "mobile_or_email and new_password required")
+		return
+	}
+
+	if err := h.svc.ResetPassword(ctx, req.MobileOrEmail, req.NewPassword); err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			ErrorJSON(w, http.StatusNotFound, "user not found")
+		default:
+			ErrorJSON(w, http.StatusInternalServerError, "reset password failed")
+		}
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]any{"success": true})
+}

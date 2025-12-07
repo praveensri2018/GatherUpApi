@@ -32,8 +32,15 @@ func main() {
 		BcryptCost:        cfg.BcryptCost,
 		RefreshTokenBytes: cfg.RefreshTokenBytes,
 		RefreshTTL:        cfg.RefreshTokenTTL,
+
+		OTPDigits: 6,
+		OTPTTL:    10 * time.Minute,
 	}
-	authSvc := service.NewAuthService(userRepo, jwtMgr, authCfg)
+
+	// Fast2SMS API key should come from env / config
+	smsClient := service.NewFast2SMSClient(cfg.Fast2SMSKey)
+
+	authSvc := service.NewAuthService(userRepo, jwtMgr, authCfg, smsClient)
 
 	handler := api.WireRouter(userRepo, jwtMgr, authSvc)
 

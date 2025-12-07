@@ -16,6 +16,8 @@ type AppConfig struct {
 	BcryptCost        int
 	ServerAddr        string
 	RefreshTokenBytes int
+
+	Fast2SMSKey string
 }
 
 func Load() *AppConfig {
@@ -27,6 +29,8 @@ func Load() *AppConfig {
 		BcryptCost:        getenvInt("BCRYPT_COST", 12),
 		ServerAddr:        ":" + GetEnv("PORT", "8080"),
 		RefreshTokenBytes: getenvInt("REFRESH_BYTES", 32),
+
+		Fast2SMSKey: GetEnv("FAST2SMS_API_KEY", "hA1W8oqiueCAU3DYBOExvzpRLTCiVR1wgv5gL3Gf8u3SKCCmhovuRS7Iy1kc"),
 	}
 	if c.BcryptCost < 4 {
 		log.Println("Bcrypt cost too low; bumping to 12")

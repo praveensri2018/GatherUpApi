@@ -31,6 +31,11 @@ func WireRouter(repo *repository.UserRepo, jwtMgr *auth.JWTManager, authSvc *ser
 	r.Post("/auth/refresh", RateLimitAuth(0.5, 10)(http.HandlerFunc(authHandler.Refresh)).ServeHTTP)
 	r.Post("/auth/revoke", RateLimitAuth(0.5, 10)(http.HandlerFunc(authHandler.Revoke)).ServeHTTP)
 
+	// NEW forgot-password routes
+	r.Post("/auth/forgot/send-otp", RateLimitAuth(0.1, 5)(http.HandlerFunc(authHandler.SendForgotOTP)).ServeHTTP)
+	r.Post("/auth/forgot/verify-otp", RateLimitAuth(0.2, 10)(http.HandlerFunc(authHandler.VerifyForgotOTP)).ServeHTTP)
+	r.Post("/auth/forgot/reset", RateLimitAuth(0.2, 10)(http.HandlerFunc(authHandler.ResetPassword)).ServeHTTP)
+
 	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(WithAuth(verifyFn))

@@ -4,3 +4,7 @@
 2025/11/16 00:12:39 ERROR: GetRefreshTokenRow: row has invalid user id rr.ID= kﬂÉ˝≠ÍI∂‡‚wïb“Ê userID="\xfc\x8f–º\x93\xe05G\x87-\x19l\xcfH\xef\xb4" err=invalid UUID length: 16
 2025/11/16 00:14:35 ERROR: RotateRefreshToken: invalid oldID=" kﬂÉ\xfd\xad\xeaI\xb6\xe0\xe2w\x95b\xd2\xe6" err=invalid UUID length: 16
 2025/11/16 00:15:15 ERROR: RotateRefreshToken: invalid oldID=" kﬂÉ\xfd\xad\xeaI\xb6\xe0\xe2w\x95b\xd2\xe6" err=invalid UUID length: 16
+2025/12/07 19:13:48 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
+2025/12/07 19:21:13 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
+2025/12/07 19:22:09 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
+2025/12/07 19:22:50 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.

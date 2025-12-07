@@ -36,6 +36,8 @@ type RefreshTokenRow struct {
 	LastUsedAt *time.Time
 }
 
+var ErrUserNotFound = errors.New("user not found")
+
 // NewUserRepo constructs a UserRepo. You may provide nil loggers to use defaults
 // (default: info -> stdout, error -> logs/error.log + stdout).
 // Place: call this from bootstrap (backend/go/cmd/server/main.go) instead of the old constructor.
@@ -50,6 +52,29 @@ func NewUserRepo(db *sql.DB, infoLogger, errorLogger *log.Logger) *UserRepo {
 		}
 	}
 	return &UserRepo{db: db, infoLogger: infoLogger, errorLogger: errorLogger}
+}
+
+func (r *UserRepo) UpdatePasswordByIdentifier(ctx context.Context, identifier, passwordHash string) error {
+	r.infoLogger.Printf("UpdatePasswordByIdentifier: identifier=%s", identifier)
+
+	res, err := r.db.ExecContext(ctx, `
+        UPDATE dbo.user_credentials
+        SET password_hash = @p1, updated_at = SYSUTCDATETIME()
+        WHERE credential_type = 'password' AND credential_identifier = @p2 AND is_deleted = 0
+    `, passwordHash, identifier)
+	if err != nil {
+		r.errorLogger.Printf("UpdatePasswordByIdentifier: exec failed identifier=%s err=%v", identifier, err)
+		return err
+	}
+
+	rows, err := res.RowsAffected()
+	if err == nil && rows == 0 {
+		r.infoLogger.Printf("UpdatePasswordByIdentifier: no rows for identifier=%s", identifier)
+		return ErrUserNotFound
+	}
+
+	r.infoLogger.Printf("UpdatePasswordByIdentifier: updated password identifier=%s", identifier)
+	return nil
 }
 
 // defaultLoggers returns (infoLogger, errorLogger).

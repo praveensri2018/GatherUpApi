@@ -3,7 +3,7 @@
     "_postman_id": "8d6a2d2e-0000-4000-8000-000000000001",
     "name": "GatherUp API (mobile auth)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Mobile-number based auth collection: register, login, refresh, get profile"
+    "description": "Mobile-number based auth collection: register, login, refresh, get profile, forgot password OTP flow"
   },
   "item": [
     {
@@ -40,7 +40,9 @@
               "    if (json.access_token) { pm.environment.set('access_token', json.access_token); }",
               "    if (json.refresh_token) { pm.environment.set('refresh_token', json.refresh_token); }",
               "    pm.test('saved tokens to environment', function() { pm.expect(json.access_token).to.exist; });",
-              "  } catch (e) { pm.test('response json parse', function() { throw e; }); }",
+              "  } catch (e) {",
+              "    pm.test('response json parse', function() { throw e; });",
+              "  }",
               "} else {",
               "  pm.test('login response status 200', function() { pm.expect(pm.response.code).to.equal(200); });",
               "}"
@@ -80,7 +82,9 @@
               "    if (json.access_token) { pm.environment.set('access_token', json.access_token); }",
               "    if (json.refresh_token) { pm.environment.set('refresh_token', json.refresh_token); }",
               "    pm.test('refresh returned tokens', function() { pm.expect(json.access_token).to.exist; });",
-              "  } catch (e) { pm.test('response json parse', function() { throw e; }); }",
+              "  } catch (e) {",
+              "    pm.test('response json parse', function() { throw e; });",
+              "  }",
               "} else {",
               "  pm.test('refresh response status 200', function() { pm.expect(pm.response.code).to.equal(200); });",
               "}"
@@ -124,6 +128,69 @@
           "host": ["localhost"],
           "port": "8080",
           "path": ["api", "me"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Forgot: Send OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobile_or_email\": \"{{mobile_number}}\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/auth/forgot/send-otp",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["auth", "forgot", "send-otp"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Forgot: Verify OTP",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobile_or_email\": \"{{mobile_number}}\",\n  \"otp\": \"{{otp}}\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/auth/forgot/verify-otp",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["auth", "forgot", "verify-otp"]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Forgot: Reset Password",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"mobile_or_email\": \"{{mobile_number}}\",\n  \"new_password\": \"{{new_password}}\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:8080/auth/forgot/reset",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "8080",
+          "path": ["auth", "forgot", "reset"]
         }
       },
       "response": []

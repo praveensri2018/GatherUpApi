@@ -26,3 +26,7 @@ func JwtSecret() string {
 func ServerPort() string {
 	return GetEnv("PORT", "8080")
 }
+
+func Fast2SMSKey() string {
+	return GetEnv("FAST2SMS_API_KEY", "hA1W8oqiueCAU3DYBOExvzpRLTCiVR1wgv5gL3Gf8u3SKCCmhovuRS7Iy1kc")
+}
