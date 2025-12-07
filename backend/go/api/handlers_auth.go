@@ -73,7 +73,13 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 
 	id, err := h.svc.Register(ctx, req.MobileNumber, req.Password)
 	if err != nil {
-		// return generic message to client
+		// 🔍 check for duplicate user
+		if errors.Is(err, service.ErrUserAlreadyExists) {
+			// 409 Conflict is a good status for "already exists"
+			ErrorJSON(w, http.StatusConflict, "user already exists")
+			return
+		}
+		// generic error for other failures
 		ErrorJSON(w, http.StatusBadRequest, "register failed")
 		return
 	}

@@ -29,6 +29,9 @@ func NewAuthService(repo *repository.UserRepo, jwtMgr *auth.JWTManager, cfg *Aut
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrRefreshTokenNotFound = errors.New("refresh token not found or revoked/expired")
 
+// 👇 NEW: exported sentinel for duplicate user
+var ErrUserAlreadyExists = errors.New("user already exists")
+
 func NormalizeMobile(m string) string {
 	if m == "" {
 		return ""
@@ -56,7 +59,8 @@ func (s *AuthService) Register(ctx context.Context, mobile, password string) (st
 		return "", err
 	}
 	if uid != "" {
-		return "", errors.New("user already exists")
+		// 🔴 use sentinel instead of new error every time
+		return "", ErrUserAlreadyExists
 	}
 
 	phash, err := auth.HashPassword(password, s.cfg.BcryptCost)
