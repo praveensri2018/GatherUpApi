@@ -159,23 +159,44 @@
       ]
     },
     {
-      "name": "Feed",
-      "item": [
-        {
-          "name": "Personalized Feed",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": "{{base_url}}/posts/feed/personalized"
+  "name": "Feed",
+  "item": [
+    {
+      "name": "Personalized Feed (Paginated)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
           }
+        ],
+        "url": {
+          "raw": "{{base_url}}/posts/feed/personalized?limit=10&cursor={{cursor}}",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "posts",
+            "feed",
+            "personalized"
+          ],
+          "query": [
+            {
+              "key": "limit",
+              "value": "10"
+            },
+            {
+              "key": "cursor",
+              "value": "{{cursor}}"
+            }
+          ]
         }
-      ]
-    },
+      }
+    }
+  ]
+}
+,
     {
       "name": "Posts",
       "item": [

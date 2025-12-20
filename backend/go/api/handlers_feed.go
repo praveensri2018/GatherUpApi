@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"gatherup/repository"
+	"strconv"
 )
 
 type FeedHandler struct {
@@ -17,17 +18,33 @@ func NewFeedHandler(repo *repository.SocialRepo) *FeedHandler {
 
 // GET /posts/feed/personalized
 func (h *FeedHandler) PersonalizedFeed(w http.ResponseWriter, r *http.Request) {
-	userID, ok := FromContextUserID(r.Context())
-	if !ok {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+	ctx := r.Context()
+	userID, _ := FromContextUserID(ctx)
+
+	cursorStr := r.URL.Query().Get("cursor")
+	limitStr := r.URL.Query().Get("limit")
+
+	limit := 10
+	if limitStr != "" {
+		limit, _ = strconv.Atoi(limitStr)
 	}
 
-	feed, err := h.repo.GetPersonalizedFeed(r.Context(), userID)
+	var cursor *float64
+	if cursorStr != "" {
+		val, _ := strconv.ParseFloat(cursorStr, 64)
+		cursor = &val
+	}
+
+	items, nextCursor, err :=
+		h.repo.GetPersonalizedFeed(ctx, userID, cursor, limit)
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(feed)
+	json.NewEncoder(w).Encode(map[string]any{
+		"items":       items,
+		"next_cursor": nextCursor,
+	})
 }

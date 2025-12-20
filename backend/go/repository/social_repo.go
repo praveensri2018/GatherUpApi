@@ -264,66 +264,80 @@ func (r *SocialRepo) GetPersonalizedFeed(ctx context.Context, userID string) ([]
 func (r *SocialRepo) GetPersonalizedFeed(
 	ctx context.Context,
 	viewerID string,
-) ([]map[string]any, error) {
+	cursor *float64,
+	limit int,
+) ([]map[string]any, *float64, error) {
 
-	rows, err := r.db.QueryContext(ctx, `
-	WITH PostStats AS (
-		SELECT
-			p.id,
-			p.author_id,
-			p.title,
-			p.body,
-			p.kind,
-			p.created_at,
+	// p1 = viewerID
+	// p2 = limit
+	// p3 = cursor (nullable)
+	args := []any{viewerID, limit, cursor}
 
-			COUNT(DISTINCT pr.id) AS like_count,
-			COUNT(DISTINCT c.id)  AS comment_count,
-			COUNT(DISTINCT pb.id) AS bookmark_count,
+	query := `
+WITH PostStats AS (
+    SELECT
+        p.id,
+        p.author_id,
+        p.title,
+        p.body,
+        p.kind,
+        p.created_at,
 
-			MAX(CASE WHEN pr.user_id = @p1 AND pr.is_deleted = 0 THEN 1 ELSE 0 END) AS is_liked,
-			MAX(CASE WHEN pb.user_id = @p1 AND pb.is_deleted = 0 THEN 1 ELSE 0 END) AS is_bookmarked
-		FROM dbo.posts p
-		LEFT JOIN dbo.post_reactions pr ON pr.post_id = p.id AND pr.is_deleted = 0
-		LEFT JOIN dbo.comments c ON c.post_id = p.id AND c.is_deleted = 0
-		LEFT JOIN dbo.post_bookmarks pb ON pb.post_id = p.id AND pb.is_deleted = 0
-		WHERE p.is_deleted = 0
-		GROUP BY p.id, p.author_id, p.title, p.body, p.kind, p.created_at
-	)
-	SELECT TOP 10
-		ps.id,
-		ps.title,
-		ps.body,
-		ps.kind,
-		ps.created_at,
+        COUNT(DISTINCT pr.id) AS like_count,
+        COUNT(DISTINCT c.id)  AS comment_count,
+        COUNT(DISTINCT pb.id) AS bookmark_count,
 
-		u.id AS author_id,
-		u.username,
+        MAX(CASE WHEN pr.user_id = @p1 AND pr.is_deleted = 0 THEN 1 ELSE 0 END) AS is_liked,
+        MAX(CASE WHEN pb.user_id = @p1 AND pb.is_deleted = 0 THEN 1 ELSE 0 END) AS is_bookmarked
+    FROM dbo.posts p
+    LEFT JOIN dbo.post_reactions pr ON pr.post_id = p.id AND pr.is_deleted = 0
+    LEFT JOIN dbo.comments c ON c.post_id = p.id AND c.is_deleted = 0
+    LEFT JOIN dbo.post_bookmarks pb ON pb.post_id = p.id AND pb.is_deleted = 0
+    WHERE p.is_deleted = 0
+    GROUP BY p.id, p.author_id, p.title, p.body, p.kind, p.created_at
+)
 
-		ps.like_count,
-		ps.comment_count,
-		ps.bookmark_count,
-		ps.is_liked,
-		ps.is_bookmarked,
+SELECT TOP (@p2)
+    ranked.*
+FROM (
+    SELECT
+        CONVERT(nvarchar(36), ps.id) AS post_id,
+        ps.title,
+        ps.body,
+        ps.kind,
+        ps.created_at,
 
-		(
-			ps.like_count * 3 +
-			ps.comment_count * 5 +
-			ps.bookmark_count * 4 -
-			DATEDIFF(HOUR, ps.created_at, SYSUTCDATETIME()) * 0.5
-		) AS score
+        CONVERT(nvarchar(36), u.id) AS author_id,
+        u.username,
 
-	FROM PostStats ps
-	JOIN dbo.users u ON u.id = ps.author_id
-	ORDER BY score DESC
-	`, viewerID)
+        ps.like_count,
+        ps.comment_count,
+        ps.bookmark_count,
+        ps.is_liked,
+        ps.is_bookmarked,
 
+        (
+            ps.like_count * 3 +
+            ps.comment_count * 5 +
+            ps.bookmark_count * 4 -
+            DATEDIFF(HOUR, ps.created_at, SYSUTCDATETIME()) * 0.5
+        ) AS score
+    FROM PostStats ps
+    JOIN dbo.users u ON u.id = ps.author_id
+) ranked
+WHERE (@p3 IS NULL OR ranked.score < @p3)
+ORDER BY ranked.score DESC;
+`
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 
 	var posts []map[string]any
 	var postIDs []string
+	var nextCursor *float64
 
 	for rows.Next() {
 		var (
@@ -335,14 +349,19 @@ func (r *SocialRepo) GetPersonalizedFeed(
 			score                      float64
 		)
 
-		rows.Scan(
+		err := rows.Scan(
 			&postID, &title, &body, &kind, &createdAt,
 			&authorID, &username,
 			&likes, &comments, &bookmarks,
 			&isLiked, &isBookmarked,
 			&score,
 		)
+		if err != nil {
+			return nil, nil, err
+		}
 
+		// cursor = last item's score
+		nextCursor = &score
 		postIDs = append(postIDs, postID)
 
 		posts = append(posts, map[string]any{
@@ -350,7 +369,7 @@ func (r *SocialRepo) GetPersonalizedFeed(
 			"author": map[string]any{
 				"id":           authorID,
 				"username":     username,
-				"is_following": false, // optional – can add later
+				"is_following": false,
 			},
 			"content": map[string]any{
 				"title": title,
@@ -372,13 +391,13 @@ func (r *SocialRepo) GetPersonalizedFeed(
 		})
 	}
 
-	/* attach media */
+	// attach media
 	mediaMap, _ := r.getMediaByPostIDs(ctx, postIDs)
 	for _, p := range posts {
 		p["media"] = mediaMap[p["post_id"].(string)]
 	}
 
-	return posts, nil
+	return posts, nextCursor, nil
 }
 
 /* ============================================================
