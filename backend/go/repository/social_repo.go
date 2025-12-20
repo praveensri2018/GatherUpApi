@@ -253,12 +253,132 @@ func (r *SocialRepo) DeletePost(ctx context.Context, postID string) error {
 /* ============================================================
    FEED
 ============================================================ */
-
+/*
 func (r *SocialRepo) GetPersonalizedFeed(ctx context.Context, userID string) ([]map[string]any, error) {
 	if _, err := uuid.Parse(userID); err != nil {
 		return nil, err
 	}
 	return r.ListPosts(ctx)
+}
+*/
+func (r *SocialRepo) GetPersonalizedFeed(
+	ctx context.Context,
+	viewerID string,
+) ([]map[string]any, error) {
+
+	rows, err := r.db.QueryContext(ctx, `
+	WITH PostStats AS (
+		SELECT
+			p.id,
+			p.author_id,
+			p.title,
+			p.body,
+			p.kind,
+			p.created_at,
+
+			COUNT(DISTINCT pr.id) AS like_count,
+			COUNT(DISTINCT c.id)  AS comment_count,
+			COUNT(DISTINCT pb.id) AS bookmark_count,
+
+			MAX(CASE WHEN pr.user_id = @p1 AND pr.is_deleted = 0 THEN 1 ELSE 0 END) AS is_liked,
+			MAX(CASE WHEN pb.user_id = @p1 AND pb.is_deleted = 0 THEN 1 ELSE 0 END) AS is_bookmarked
+		FROM dbo.posts p
+		LEFT JOIN dbo.post_reactions pr ON pr.post_id = p.id AND pr.is_deleted = 0
+		LEFT JOIN dbo.comments c ON c.post_id = p.id AND c.is_deleted = 0
+		LEFT JOIN dbo.post_bookmarks pb ON pb.post_id = p.id AND pb.is_deleted = 0
+		WHERE p.is_deleted = 0
+		GROUP BY p.id, p.author_id, p.title, p.body, p.kind, p.created_at
+	)
+	SELECT TOP 10
+		ps.id,
+		ps.title,
+		ps.body,
+		ps.kind,
+		ps.created_at,
+
+		u.id AS author_id,
+		u.username,
+
+		ps.like_count,
+		ps.comment_count,
+		ps.bookmark_count,
+		ps.is_liked,
+		ps.is_bookmarked,
+
+		(
+			ps.like_count * 3 +
+			ps.comment_count * 5 +
+			ps.bookmark_count * 4 -
+			DATEDIFF(HOUR, ps.created_at, SYSUTCDATETIME()) * 0.5
+		) AS score
+
+	FROM PostStats ps
+	JOIN dbo.users u ON u.id = ps.author_id
+	ORDER BY score DESC
+	`, viewerID)
+
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []map[string]any
+	var postIDs []string
+
+	for rows.Next() {
+		var (
+			postID, title, body, kind  string
+			authorID, username         string
+			createdAt                  any
+			likes, comments, bookmarks int
+			isLiked, isBookmarked      int
+			score                      float64
+		)
+
+		rows.Scan(
+			&postID, &title, &body, &kind, &createdAt,
+			&authorID, &username,
+			&likes, &comments, &bookmarks,
+			&isLiked, &isBookmarked,
+			&score,
+		)
+
+		postIDs = append(postIDs, postID)
+
+		posts = append(posts, map[string]any{
+			"post_id": postID,
+			"author": map[string]any{
+				"id":           authorID,
+				"username":     username,
+				"is_following": false, // optional – can add later
+			},
+			"content": map[string]any{
+				"title": title,
+				"body":  body,
+				"kind":  kind,
+			},
+			"stats": map[string]any{
+				"likes":     likes,
+				"comments":  comments,
+				"bookmarks": bookmarks,
+			},
+			"viewer_state": map[string]any{
+				"liked":      isLiked == 1,
+				"bookmarked": isBookmarked == 1,
+			},
+			"created_at": createdAt,
+			"score":      score,
+			"media":      []any{},
+		})
+	}
+
+	/* attach media */
+	mediaMap, _ := r.getMediaByPostIDs(ctx, postIDs)
+	for _, p := range posts {
+		p["media"] = mediaMap[p["post_id"].(string)]
+	}
+
+	return posts, nil
 }
 
 /* ============================================================
