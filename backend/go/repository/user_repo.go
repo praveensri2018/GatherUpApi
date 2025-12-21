@@ -24,6 +24,22 @@ type UserRepo struct {
 	errorLogger *log.Logger
 }
 
+type UpdateProfileRequest struct {
+	DisplayName *string
+	Username    *string
+	Bio         *string
+	Email       *string
+	Gender      *string
+}
+
+var req struct {
+	DisplayName *string `json:"display_name"`
+	Username    *string `json:"username"`
+	Bio         *string `json:"bio"`
+	Email       *string `json:"email"`
+	Gender      *string `json:"gender"`
+}
+
 // RefreshTokenRow is a lightweight struct representing refresh_tokens row.
 type RefreshTokenRow struct {
 	ID         string
@@ -454,4 +470,121 @@ func sqlNullString(p *string) interface{} {
 		return nil
 	}
 	return *p
+}
+
+// GetProfileByID returns public profile info for profile screen
+func (r *UserRepo) GetProfileByID(
+	ctx context.Context,
+	userID string,
+) (map[string]any, error) {
+
+	if _, err := uuid.Parse(userID); err != nil {
+		return nil, err
+	}
+
+	row := r.db.QueryRowContext(ctx, `
+		SELECT
+			CONVERT(nvarchar(36), u.id),
+			u.display_name,
+			u.username,
+			u.avatar_url,
+			u.bio,
+			u.created_at,
+
+			(SELECT COUNT(*) FROM dbo.posts p WHERE p.author_id = u.id AND p.is_deleted = 0),
+			(SELECT COUNT(*) FROM dbo.user_follows f WHERE f.following_id = u.id AND f.is_deleted = 0),
+			(SELECT COUNT(*) FROM dbo.user_follows f WHERE f.follower_id = u.id AND f.is_deleted = 0)
+
+		FROM dbo.users u
+		WHERE u.id = @p1 AND u.is_deleted = 0
+	`, userID)
+
+	var (
+		id, displayName, username, avatarURL, bio sql.NullString
+		createdAt                                 any
+		postCount, followerCount, followingCount  int
+	)
+
+	if err := row.Scan(
+		&id,
+		&displayName,
+		&username,
+		&avatarURL,
+		&bio,
+		&createdAt,
+		&postCount,
+		&followerCount,
+		&followingCount,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return map[string]any{
+		"id":           id.String,
+		"display_name": displayName.String,
+		"username":     username.String,
+		"avatar_url":   avatarURL.String,
+		"bio":          bio.String,
+		"created_at":   createdAt,
+		"stats": map[string]any{
+			"posts":     postCount,
+			"followers": followerCount,
+			"following": followingCount,
+		},
+	}, nil
+}
+
+func (r *UserRepo) UpdateProfile(
+	ctx context.Context,
+	userID string,
+	req UpdateProfileRequest,
+) error {
+
+	if _, err := uuid.Parse(userID); err != nil {
+		return err
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE dbo.users
+		SET
+			display_name = COALESCE(@p2, display_name),
+			username     = COALESCE(@p3, username),
+			bio          = COALESCE(@p4, bio),
+			email        = COALESCE(@p5, email),
+			gender       = COALESCE(@p6, gender),
+			updated_at   = SYSUTCDATETIME()
+		WHERE id = @p1 AND is_deleted = 0
+	`,
+		userID,
+		req.DisplayName,
+		req.Username,
+		req.Bio,
+		req.Email,
+		req.Gender,
+	)
+
+	return err
+}
+
+func (r *UserRepo) UpdateAvatar(
+	ctx context.Context,
+	userID string,
+	avatarURL string,
+) error {
+
+	if _, err := uuid.Parse(userID); err != nil {
+		return err
+	}
+
+	_, err := r.db.ExecContext(ctx, `
+		UPDATE dbo.users
+		SET avatar_url = @p2,
+		    updated_at = SYSUTCDATETIME()
+		WHERE id = @p1 AND is_deleted = 0
+	`, userID, avatarURL)
+
+	return err
 }

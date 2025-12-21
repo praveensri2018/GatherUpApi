@@ -126,6 +126,10 @@ func WireRouter(
 
 		r.Get("/users/me/posts", postHandler.ListMyPosts)
 
+		r.Get("/users/{id}", userHandler.GetProfile)
+		r.Patch("/users/me", userHandler.UpdateMe)
+		r.Post("/users/me/avatar", userHandler.UpdateAvatar)
+
 	})
 
 	/* ---------------- HEALTH ---------------- */
