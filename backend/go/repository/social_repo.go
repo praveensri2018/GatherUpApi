@@ -472,14 +472,41 @@ func (r *SocialRepo) DeleteComment(ctx context.Context, commentID string) error 
 ============================================================ */
 
 func (r *SocialRepo) ReactToPost(ctx context.Context, postID, userID string) error {
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO dbo.post_reactions
-			(post_id, user_id, reaction_type_id, created_at, is_deleted)
-		VALUES
-			(@p1, @p2, 1, SYSUTCDATETIME(), 0)
+
+	// 1️⃣ Try to reactivate existing reaction
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE dbo.post_reactions
+		SET 
+			is_deleted = 0,
+			deleted_at = NULL,
+			created_at = SYSUTCDATETIME()
+		WHERE 
+			post_id = @p1 
+			AND user_id = @p2
+			AND is_deleted = 1
 	`, postID, userID)
 
-	return err
+	if err != nil {
+		return err
+	}
+
+	rows, _ := res.RowsAffected()
+
+	// 2️⃣ If no row updated, insert new
+	if rows == 0 {
+		_, err = r.db.ExecContext(ctx, `
+			INSERT INTO dbo.post_reactions
+				(post_id, user_id, reaction_type_id, created_at, is_deleted)
+			VALUES
+				(@p1, @p2, 1, SYSUTCDATETIME(), 0)
+		`, postID, userID)
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (r *SocialRepo) UnreactPost(ctx context.Context, postID, userID string) error {
