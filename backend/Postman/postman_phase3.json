@@ -48,7 +48,7 @@
             "url": "{{base_url}}/users/{{user_id}}"
           }
         },
-        {
+        { 
           "name": "Update My Profile",
           "request": {
             "method": "PUT",

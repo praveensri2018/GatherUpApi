@@ -52,6 +52,7 @@ var ErrRefreshTokenNotFound = errors.New("refresh token not found or revoked/exp
 
 // 👇 NEW: exported sentinel for duplicate user
 var ErrUserAlreadyExists = errors.New("user already exists")
+var ErrUsernameAlreadyExists = errors.New("username already exists")
 
 var (
 	ErrUserNotFound   = errors.New("user not found")
@@ -100,31 +101,98 @@ func (s *AuthService) ResetPassword(ctx context.Context, mobile, newPassword str
 	return nil
 }
 
-func (s *AuthService) Register(ctx context.Context, mobile, password string) (string, error) {
-	if mobile == "" || password == "" {
-		return "", errors.New("mobile and password are required")
+func (s *AuthService) Register(
+	ctx context.Context,
+	mobile string,
+	password string,
+	username string,
+	fullName string,
+	deviceInfo string,
+) (
+	accessToken string,
+	accessExp time.Time,
+	refreshRaw string,
+	refreshExpiry time.Time,
+	err error,
+) {
+
+	if mobile == "" || password == "" || username == "" || fullName == "" {
+		err = errors.New("mobile, password, username and fullname are required")
+		return
 	}
+
 	mobileNorm := NormalizeMobile(mobile)
 
+	// check duplicate
 	uid, _, err := s.repo.GetCredentialByIdentifier(ctx, mobileNorm)
 	if err != nil {
-		return "", err
+		return
 	}
 	if uid != "" {
-		// 🔴 use sentinel instead of new error every time
-		return "", ErrUserAlreadyExists
+		err = ErrUserAlreadyExists
+		return
 	}
 
+	// check username duplicate
+	taken, err := s.repo.IsUsernameTaken(ctx, username)
+	if err != nil {
+		return
+	}
+	if taken {
+		err = ErrUsernameAlreadyExists
+		return
+	}
+
+	// hash password
 	phash, err := auth.HashPassword(password, s.cfg.BcryptCost)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	userID, err := s.repo.CreateUserWithPassword(ctx, mobile, mobileNorm, phash)
+	// create user
+	userID, err := s.repo.CreateUserWithPassword(
+		ctx,
+		mobile,
+		mobileNorm,
+		username,
+		fullName,
+		phash,
+	)
 	if err != nil {
-		return "", err
+		return
 	}
-	return userID, nil
+
+	// 🔐 GENERATE ACCESS TOKEN (same as Login)
+	accessToken, accessExp, err = s.jwtManager.Generate(userID, nil)
+	if err != nil {
+		return
+	}
+
+	// 🔁 GENERATE REFRESH TOKEN
+	raw, hash, err := auth.GenerateRefreshToken(s.cfg.RefreshTokenBytes)
+	if err != nil {
+		return
+	}
+
+	refreshExpiry = auth.RefreshTokenExpiry(s.cfg.RefreshTTL)
+
+	var devicePtr *string
+	if deviceInfo != "" {
+		devicePtr = &deviceInfo
+	}
+
+	if _, err = s.repo.SaveRefreshToken(
+		ctx,
+		userID,
+		hash,
+		devicePtr,
+		refreshExpiry,
+	); err != nil {
+		return
+	}
+
+	refreshRaw = raw
+	return
 }
 
 func (s *AuthService) Login(ctx context.Context, mobile, password, deviceInfo string) (accessToken string, accessExp time.Time, refreshRaw string, refreshExpiry time.Time, err error) {

@@ -13,11 +13,19 @@ import (
 
 var mobileRe = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
 
+/*
+	type registerReq struct {
+		MobileNumber string `json:"mobile_number"`
+		Password     string `json:"password"`
+	}
+*/
 type registerReq struct {
 	MobileNumber string `json:"mobile_number"`
 	Password     string `json:"password"`
+	Username     string `json:"username"`
+	FullName     string `json:"fullname"`
+	DeviceInfo   string `json:"device_info,omitempty"`
 }
-
 type loginReq struct {
 	MobileNumber string `json:"mobile_number"`
 	Password     string `json:"password"`
@@ -50,40 +58,60 @@ type AuthHandler struct {
 func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 	return &AuthHandler{svc: svc}
 }
-
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var req registerReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrorJSON(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if req.MobileNumber == "" || req.Password == "" {
-		ErrorJSON(w, http.StatusBadRequest, "mobile_number and password required")
+
+	if req.MobileNumber == "" || req.Password == "" || req.Username == "" || req.FullName == "" {
+		ErrorJSON(w, http.StatusBadRequest, "mobile_number, password, username and fullname required")
 		return
 	}
+
 	if !mobileRe.MatchString(req.MobileNumber) {
 		ErrorJSON(w, http.StatusBadRequest, "invalid mobile_number format")
 		return
 	}
 
-	id, err := h.svc.Register(ctx, req.MobileNumber, req.Password)
+	access, accessExp, refreshRaw, _, err :=
+		h.svc.Register(
+			ctx,
+			req.MobileNumber,
+			req.Password,
+			req.Username,
+			req.FullName,
+			req.DeviceInfo,
+		)
+
 	if err != nil {
-		// 🔍 check for duplicate user
-		if errors.Is(err, service.ErrUserAlreadyExists) {
-			// 409 Conflict is a good status for "already exists"
+		switch {
+		case errors.Is(err, service.ErrUserAlreadyExists):
 			ErrorJSON(w, http.StatusConflict, "user already exists")
 			return
+
+		case errors.Is(err, service.ErrUsernameAlreadyExists):
+			ErrorJSON(w, http.StatusConflict, "username already exists")
+			return
+
+		default:
+			ErrorJSON(w, http.StatusBadRequest, "register failed")
+			return
 		}
-		// generic error for other failures
-		ErrorJSON(w, http.StatusBadRequest, "register failed")
-		return
 	}
-	JSON(w, http.StatusCreated, map[string]string{"id": id})
+
+	JSON(w, http.StatusCreated, tokenResp{
+		AccessToken:  access,
+		RefreshToken: refreshRaw,
+		ExpiresAt:    accessExp,
+	})
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {

@@ -144,36 +144,86 @@ func (r *UserRepo) CreateUser(ctx context.Context, u *models.User) (string, erro
 	return id, nil
 }
 
-// CreateUserWithPassword - create user row AND credential row in a single transaction.
-func (r *UserRepo) CreateUserWithPassword(ctx context.Context, mobileRaw, mobileNorm, passwordHash string) (string, error) {
+func (r *UserRepo) IsUsernameTaken(ctx context.Context, username string) (bool, error) {
+	var exists int
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT 1
+		FROM dbo.users
+		WHERE LOWER(username) = LOWER(@p1)
+	`, username).Scan(&exists)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (r *UserRepo) CreateUserWithPassword(
+	ctx context.Context,
+	mobileRaw string,
+	mobileNorm string,
+	username string,
+	displayName string,
+	passwordHash string,
+) (string, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		r.errorLogger.Printf("CreateUserWithPassword: begin tx failed: %v", err)
 		return "", err
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer func() { _ = tx.Rollback() }()
 
 	userID := uuid.New().String()
 	now := time.Now().UTC()
 
 	r.infoLogger.Printf("CreateUserWithPassword: creating userID=%s mobile=%s", userID, mobileRaw)
 
-	// Insert into users (profile only)
+	// 👤 users table
 	if _, err = tx.ExecContext(ctx, `
-        INSERT INTO dbo.users (id, mobile_number, mobile_normalized, created_at, is_deleted)
-        VALUES (@p1, @p2, @p3, @p4, 0)
-    `, userID, mobileRaw, mobileNorm, now); err != nil {
+		INSERT INTO dbo.users (
+			id,
+			mobile_number,
+			mobile_normalized,
+			username,
+			display_name,
+			created_at,
+			is_deleted
+		)
+		VALUES (@p1, @p2, @p3, @p4, @p5, @p6, 0)
+	`,
+		userID,
+		mobileRaw,
+		mobileNorm,
+		username,
+		displayName,
+		now,
+	); err != nil {
 		r.errorLogger.Printf("CreateUserWithPassword: insert users failed userID=%s err=%v", userID, err)
 		return "", err
 	}
 
-	// Insert into user_credentials
+	// 🔐 credentials table
 	if _, err = tx.ExecContext(ctx, `
-        INSERT INTO dbo.user_credentials (user_id, credential_type, credential_identifier, password_hash, created_at, is_deleted)
-        VALUES (@p1, @p2, @p3, @p4, @p5, 0)
-    `, userID, "password", mobileNorm, passwordHash, now); err != nil {
+		INSERT INTO dbo.user_credentials (
+			user_id,
+			credential_type,
+			credential_identifier,
+			password_hash,
+			created_at,
+			is_deleted
+		)
+		VALUES (@p1, 'password', @p2, @p3, @p4, 0)
+	`,
+		userID,
+		mobileNorm,
+		passwordHash,
+		now,
+	); err != nil {
 		r.errorLogger.Printf("CreateUserWithPassword: insert credentials failed userID=%s err=%v", userID, err)
 		return "", err
 	}
@@ -182,6 +232,7 @@ func (r *UserRepo) CreateUserWithPassword(ctx context.Context, mobileRaw, mobile
 		r.errorLogger.Printf("CreateUserWithPassword: commit failed userID=%s err=%v", userID, err)
 		return "", err
 	}
+
 	r.infoLogger.Printf("CreateUserWithPassword: success userID=%s", userID)
 	return userID, nil
 }

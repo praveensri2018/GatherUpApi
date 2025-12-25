@@ -1,3 +1,10 @@
+Start Project Command Code
+
+cd backend/go
+go mod tidy
+go run ./cmd/server
+
+
 # 🌀 GatherUp
 
 **Real-time social, chat, and tournament platform powered by Go + WebSockets + Android (Kotlin).**

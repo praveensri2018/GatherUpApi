@@ -8,3 +8,4 @@
 2025/12/07 19:21:13 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
 2025/12/07 19:22:09 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
 2025/12/07 19:22:50 ERROR: UpdatePasswordByIdentifier: exec failed identifier=9042122855 err=mssql: Invalid column name 'updated_at'.
+2025/12/25 13:25:17 ERROR: CreateUserWithPassword: insert users failed userID=1eba49c4-31b0-438b-9172-52802e8c7160 err=mssql: Cannot insert duplicate key row in object 'dbo.users' with unique index 'ux_users_username'. The duplicate key value is (praveenbala).
