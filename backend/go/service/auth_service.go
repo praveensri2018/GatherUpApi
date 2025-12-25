@@ -3,20 +3,18 @@
 import (
 	"context"
 	"errors"
-	"strings"
-	"time"
-
 	"gatherup/auth"
 	"gatherup/repository"
+	"strings"
+	"time"
 )
 
 type AuthConfig struct {
 	BcryptCost        int
 	RefreshTokenBytes int
 	RefreshTTL        time.Duration
-
-	OTPDigits int
-	OTPTTL    time.Duration
+	OTPDigits         int
+	OTPTTL            time.Duration
 }
 
 type SMSClient interface {
@@ -27,9 +25,8 @@ type AuthService struct {
 	repo       *repository.UserRepo
 	jwtManager *auth.JWTManager
 	cfg        *AuthConfig
-
-	smsClient SMSClient
-	otpStore  *OTPStore
+	smsClient  SMSClient
+	otpStore   *OTPStore
 }
 
 func NewAuthService(repo *repository.UserRepo, jwtMgr *auth.JWTManager, cfg *AuthConfig, smsClient SMSClient) *AuthService {
@@ -42,15 +39,8 @@ func NewAuthService(repo *repository.UserRepo, jwtMgr *auth.JWTManager, cfg *Aut
 	}
 }
 
-/*
-func NewAuthService(repo *repository.UserRepo, jwtMgr *auth.JWTManager, cfg *AuthConfig) *AuthService {
-	return &AuthService{repo: repo, jwtManager: jwtMgr, cfg: cfg}
-}*/
-
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrRefreshTokenNotFound = errors.New("refresh token not found or revoked/expired")
-
-// 👇 NEW: exported sentinel for duplicate user
 var ErrUserAlreadyExists = errors.New("user already exists")
 var ErrUsernameAlreadyExists = errors.New("username already exists")
 
@@ -86,12 +76,10 @@ func (s *AuthService) ResetPassword(ctx context.Context, mobile, newPassword str
 	if mobileNorm == "" {
 		return errors.New("invalid mobile")
 	}
-
 	phash, err := auth.HashPassword(newPassword, s.cfg.BcryptCost)
 	if err != nil {
 		return err
 	}
-
 	if err := s.repo.UpdatePasswordByIdentifier(ctx, mobileNorm, phash); err != nil {
 		if errors.Is(err, repository.ErrUserNotFound) {
 			return ErrUserNotFound
@@ -120,10 +108,7 @@ func (s *AuthService) Register(
 		err = errors.New("mobile, password, username and fullname are required")
 		return
 	}
-
 	mobileNorm := NormalizeMobile(mobile)
-
-	// check duplicate
 	uid, _, err := s.repo.GetCredentialByIdentifier(ctx, mobileNorm)
 	if err != nil {
 		return
@@ -132,8 +117,6 @@ func (s *AuthService) Register(
 		err = ErrUserAlreadyExists
 		return
 	}
-
-	// check username duplicate
 	taken, err := s.repo.IsUsernameTaken(ctx, username)
 	if err != nil {
 		return
@@ -142,14 +125,10 @@ func (s *AuthService) Register(
 		err = ErrUsernameAlreadyExists
 		return
 	}
-
-	// hash password
 	phash, err := auth.HashPassword(password, s.cfg.BcryptCost)
 	if err != nil {
 		return
 	}
-
-	// create user
 	userID, err := s.repo.CreateUserWithPassword(
 		ctx,
 		mobile,
@@ -161,19 +140,14 @@ func (s *AuthService) Register(
 	if err != nil {
 		return
 	}
-
-	// 🔐 GENERATE ACCESS TOKEN (same as Login)
 	accessToken, accessExp, err = s.jwtManager.Generate(userID, nil)
 	if err != nil {
 		return
 	}
-
-	// 🔁 GENERATE REFRESH TOKEN
 	raw, hash, err := auth.GenerateRefreshToken(s.cfg.RefreshTokenBytes)
 	if err != nil {
 		return
 	}
-
 	refreshExpiry = auth.RefreshTokenExpiry(s.cfg.RefreshTTL)
 
 	var devicePtr *string
@@ -245,7 +219,6 @@ func (s *AuthService) Refresh(ctx context.Context, raw string) (newAccess string
 	if time.Now().UTC().After(row.ExpiresAt) {
 		return "", time.Time{}, "", time.Time{}, ErrRefreshTokenNotFound
 	}
-	// mark last_used and then rotate
 	newAccess, accessExp, err = s.jwtManager.Generate(row.UserID, nil)
 	if err != nil {
 		return "", time.Time{}, "", time.Time{}, err

@@ -13,12 +13,6 @@ import (
 
 var mobileRe = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
 
-/*
-	type registerReq struct {
-		MobileNumber string `json:"mobile_number"`
-		Password     string `json:"password"`
-	}
-*/
 type registerReq struct {
 	MobileNumber string `json:"mobile_number"`
 	Password     string `json:"password"`
@@ -110,7 +104,8 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusCreated, tokenResp{
 		AccessToken:  access,
 		RefreshToken: refreshRaw,
-		ExpiresAt:    accessExp,
+
+		ExpiresAt: accessExp,
 	})
 }
 
@@ -194,7 +189,6 @@ func (h *AuthHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// POST /auth/forgot/send-otp
 func (h *AuthHandler) SendForgotOTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -218,7 +212,6 @@ func (h *AuthHandler) SendForgotOTP(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.SendForgotOTP(ctx, req.MobileOrEmail); err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
-			// You can choose 404 or 200 with generic message; keeping 404 here.
 			ErrorJSON(w, http.StatusNotFound, "user not found")
 		default:
 			ErrorJSON(w, http.StatusInternalServerError, "failed to send otp")
@@ -229,7 +222,6 @@ func (h *AuthHandler) SendForgotOTP(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
-// POST /auth/forgot/verify-otp
 func (h *AuthHandler) VerifyForgotOTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -263,7 +255,6 @@ func (h *AuthHandler) VerifyForgotOTP(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
-// POST /auth/forgot/reset
 func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

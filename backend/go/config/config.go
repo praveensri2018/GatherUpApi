@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// AppConfig collects runtime config values.
 type AppConfig struct {
 	DSN               string
 	JWTSecret         string
@@ -16,13 +15,11 @@ type AppConfig struct {
 	BcryptCost        int
 	ServerAddr        string
 	RefreshTokenBytes int
-
-	Fast2SMSKey string
-
-	R2AccountID string
-	R2AccessKey string
-	R2SecretKey string
-	R2Bucket    string
+	Fast2SMSKey       string
+	R2AccountID       string
+	R2AccessKey       string
+	R2SecretKey       string
+	R2Bucket          string
 }
 
 func Load() *AppConfig {
@@ -40,7 +37,6 @@ func Load() *AppConfig {
 			"hA1W8oqiueCAU3DYBOExvzpRLTCiVR1wgv5gL3Gf8u3SKCCmhovuRS7Iy1kc",
 		),
 
-		// Cloudflare R2
 		R2AccountID: GetEnv("R2_ACCOUNT_ID", "8c45e84e66b0ef932a97407d1dc5f022"),
 		R2AccessKey: GetEnv("R2_ACCESS_KEY", "17cd993626d63226ab7da82792e3b80e"),
 		R2SecretKey: GetEnv("R2_SECRET_KEY", "76a97f8a4d4b2e29b27ff56751dd079814872e234886fa0107f60c04cea7ac14"),
@@ -52,7 +48,6 @@ func Load() *AppConfig {
 		c.BcryptCost = 12
 	}
 
-	// 🔐 Safety check (important)
 	if c.R2AccountID == "" || c.R2AccessKey == "" || c.R2SecretKey == "" {
 		log.Println("⚠️ WARNING: Cloudflare R2 config missing (uploads will fail)")
 	}

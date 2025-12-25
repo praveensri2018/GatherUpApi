@@ -1,23 +1,19 @@
-﻿/* Place: backend/go/repository/user_repo.go */
-package repository
+﻿package repository
 
 import (
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"gatherup/models"
 	"io"
 	"log"
 	"os"
 	"time"
 
-	"gatherup/models"
-
 	"github.com/google/uuid"
 )
 
-// UserRepo manages user-related DB operations.
-// It logs info messages to infoLogger and errors to errorLogger (both also print to console).
 type UserRepo struct {
 	db          *sql.DB
 	infoLogger  *log.Logger
@@ -40,7 +36,6 @@ var req struct {
 	Gender      *string `json:"gender"`
 }
 
-// RefreshTokenRow is a lightweight struct representing refresh_tokens row.
 type RefreshTokenRow struct {
 	ID         string
 	UserID     string
@@ -54,9 +49,6 @@ type RefreshTokenRow struct {
 
 var ErrUserNotFound = errors.New("user not found")
 
-// NewUserRepo constructs a UserRepo. You may provide nil loggers to use defaults
-// (default: info -> stdout, error -> logs/error.log + stdout).
-// Place: call this from bootstrap (backend/go/cmd/server/main.go) instead of the old constructor.
 func NewUserRepo(db *sql.DB, infoLogger, errorLogger *log.Logger) *UserRepo {
 	if infoLogger == nil || errorLogger == nil {
 		dInfo, dErr := defaultLoggers()
@@ -93,39 +85,25 @@ func (r *UserRepo) UpdatePasswordByIdentifier(ctx context.Context, identifier, p
 	return nil
 }
 
-// defaultLoggers returns (infoLogger, errorLogger).
-// errorLogger writes to a persistent file "logs/error.log" (create folder if needed) and also to stdout.
 func defaultLoggers() (*log.Logger, *log.Logger) {
-	// info -> stdout
 	info := log.New(os.Stdout, "INFO: ", log.LstdFlags|log.Lmsgprefix)
-
-	// ensure log directory exists
 	if err := os.MkdirAll("logs", 0o755); err != nil {
-		// fallback: print to stdout and return same logger for error
 		info.Printf("failed to create logs dir: %v", err)
 		errLogger := log.New(io.MultiWriter(os.Stdout), "ERROR: ", log.LstdFlags|log.Lmsgprefix)
 		return info, errLogger
 	}
-
-	// open error log file for append
 	f, err := os.OpenFile("logs/error.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		// fallback to stdout if file can't be opened
 		info.Printf("failed to open error log file: %v", err)
 		errLogger := log.New(io.MultiWriter(os.Stdout), "ERROR: ", log.LstdFlags|log.Lmsgprefix)
 		return info, errLogger
 	}
-
-	// error logger writes to file AND stdout for convenience
 	errOut := io.MultiWriter(f, os.Stdout)
 	errLogger := log.New(errOut, "ERROR: ", log.LstdFlags|log.Lmsgprefix)
 
 	return info, errLogger
 }
 
-/* --------------------- Repository methods --------------------- */
-
-// CreateUser inserts a new user (profile only) and returns generated id.
 func (r *UserRepo) CreateUser(ctx context.Context, u *models.User) (string, error) {
 	id := uuid.New().String()
 	now := time.Now().UTC()
@@ -146,7 +124,6 @@ func (r *UserRepo) CreateUser(ctx context.Context, u *models.User) (string, erro
 
 func (r *UserRepo) IsUsernameTaken(ctx context.Context, username string) (bool, error) {
 	var exists int
-
 	err := r.db.QueryRowContext(ctx, `
 		SELECT 1
 		FROM dbo.users
@@ -182,8 +159,6 @@ func (r *UserRepo) CreateUserWithPassword(
 	now := time.Now().UTC()
 
 	r.infoLogger.Printf("CreateUserWithPassword: creating userID=%s mobile=%s", userID, mobileRaw)
-
-	// 👤 users table
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO dbo.users (
 			id,
@@ -207,7 +182,6 @@ func (r *UserRepo) CreateUserWithPassword(
 		return "", err
 	}
 
-	// 🔐 credentials table
 	if _, err = tx.ExecContext(ctx, `
 		INSERT INTO dbo.user_credentials (
 			user_id,
@@ -237,7 +211,6 @@ func (r *UserRepo) CreateUserWithPassword(
 	return userID, nil
 }
 
-// GetByEmailOrMobile returns a user by email or mobile (profile only).
 func (r *UserRepo) GetByEmailOrMobile(ctx context.Context, identifier string) (*models.User, error) {
 	row := r.db.QueryRowContext(ctx, `
         SELECT id, mobile_number, mobile_normalized, email, username, created_at, updated_at, is_deleted
@@ -275,15 +248,12 @@ func (r *UserRepo) GetByEmailOrMobile(ctx context.Context, identifier string) (*
 	return u, nil
 }
 
-// GetByID returns profile by user id (no password)
 func (r *UserRepo) GetByID(ctx context.Context, id string) (*models.User, error) {
-	// validate id shape (fast-fail)
 	if _, err := uuid.Parse(id); err != nil {
 		r.errorLogger.Printf("GetByID: invalid id format=%q err=%v", id, err)
 		return nil, fmt.Errorf("invalid user id: %w", err)
 	}
 
-	// request canonical string form for id to avoid driver raw-bytes
 	row := r.db.QueryRowContext(ctx, `
         SELECT CONVERT(nvarchar(36), id) as id,
                mobile_number, mobile_normalized, email, username, created_at, updated_at, is_deleted
@@ -308,9 +278,7 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (*models.User, error)
 		r.errorLogger.Printf("GetByID: missing id (unexpected) for id=%s", id)
 		return nil, fmt.Errorf("user row missing id")
 	}
-	// assign canonical string id
 	u.ID = idStr.String
-	// validate (defensive)
 	if _, err := uuid.Parse(u.ID); err != nil {
 		r.errorLogger.Printf("GetByID: invalid id returned u.ID=%q err=%v", u.ID, err)
 		return nil, fmt.Errorf("invalid user id in row: %w", err)
@@ -337,8 +305,6 @@ func (r *UserRepo) GetByID(ctx context.Context, id string) (*models.User, error)
 	return u, nil
 }
 
-// GetCredentialByIdentifier returns credential row for credential_type='password' and the linked user id.
-// Returns (userID, passwordHash, nil) if found, ("","",nil) if not found.
 func (r *UserRepo) GetCredentialByIdentifier(ctx context.Context, identifier string) (string, string, error) {
 	var uid sql.NullString
 	var ph sql.NullString
@@ -375,7 +341,6 @@ func (r *UserRepo) GetCredentialByIdentifier(ctx context.Context, identifier str
 	return userID, pwHash, nil
 }
 
-// SaveRefreshToken stores refresh token hash. Validates userID before DB write.
 func (r *UserRepo) SaveRefreshToken(ctx context.Context, userID, tokenHash string, device *string, expiresAt time.Time) (string, error) {
 	if _, err := uuid.Parse(userID); err != nil {
 		r.errorLogger.Printf("SaveRefreshToken: invalid user id format: %v (userID=%q len=%d)", err, userID, len(userID))
@@ -401,7 +366,6 @@ func (r *UserRepo) SaveRefreshToken(ctx context.Context, userID, tokenHash strin
 	return id, nil
 }
 
-// GetRefreshTokenRow finds a refresh token by hash
 func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*RefreshTokenRow, error) {
 	row := r.db.QueryRowContext(ctx, `
         SELECT CONVERT(nvarchar(36), id) as id,
@@ -460,7 +424,6 @@ func (r *UserRepo) GetRefreshTokenRow(ctx context.Context, tokenHash string) (*R
 	return &rr, nil
 }
 
-// RevokeRefreshToken marks a refresh token revoked
 func (r *UserRepo) RotateRefreshToken(ctx context.Context, oldID, newTokenHash string, newExpiry time.Time) (string, error) {
 	if _, err := uuid.Parse(oldID); err != nil {
 		r.errorLogger.Printf("RotateRefreshToken: invalid oldID=%q err=%v", oldID, err)
@@ -515,7 +478,6 @@ func (r *UserRepo) RevokeRefreshToken(ctx context.Context, id string) error {
 	return nil
 }
 
-/* helper for optional sql.NullString building from *string */
 func sqlNullString(p *string) interface{} {
 	if p == nil {
 		return nil
@@ -523,7 +485,6 @@ func sqlNullString(p *string) interface{} {
 	return *p
 }
 
-// GetProfileByID returns public profile info for profile screen
 func (r *UserRepo) GetProfileByID(
 	ctx context.Context,
 	userID string,
@@ -541,7 +502,6 @@ func (r *UserRepo) GetProfileByID(
 			u.avatar_url,
 			u.bio,
 			u.created_at,
-
 			(SELECT COUNT(*) FROM dbo.posts p WHERE p.author_id = u.id AND p.is_deleted = 0),
 			(SELECT COUNT(*) FROM dbo.user_follows f WHERE f.following_id = u.id AND f.is_deleted = 0),
 			(SELECT COUNT(*) FROM dbo.user_follows f WHERE f.follower_id = u.id AND f.is_deleted = 0)
